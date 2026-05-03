@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { libraryService } from '../services/libraryService';
 import { settingsService } from '../services/settingsService';
@@ -198,6 +199,11 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [saving, setSaving] = useState(false);
   const [confirmDisablePlaygroundOpen, setConfirmDisablePlaygroundOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('');
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   // Sync OS autostart state on mount
   useEffect(() => {
@@ -482,7 +488,7 @@ export function SettingsPage() {
         {/* ── About ── */}
         <SettingSection title="About">
           <div className="rounded-md border border-gray-700 bg-gray-800 p-4 text-sm text-gray-300 space-y-2">
-            <div><span className="text-gray-500">Version </span><span className="mono">0.1.0</span></div>
+            <div><span className="text-gray-500">Version </span><span className="mono">{appVersion || '—'}</span></div>
             <div><span className="text-gray-500">Stack </span><span className="mono">Tauri 2 · React 18 · SQLite · Rust</span></div>
             <div className="pt-2">
               <Button
