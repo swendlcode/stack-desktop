@@ -45,6 +45,7 @@
     "active": true,
     "targets": "all",
     "macOS": {
+      "signingIdentity": "-",
       "dmg": {
         "background": "icons/dmg-bg-gray-dots.png",
         "windowSize": {

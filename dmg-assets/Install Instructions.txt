@@ -5,12 +5,15 @@ Stack — Install Instructions
 
 2. Launch Stack from Applications or Spotlight.
 
-3. If macOS says "Stack is damaged and can't be opened",
-   open Terminal and run:
+3. If macOS says "Stack can't be opened because Apple cannot
+   check it for malicious software":
 
-   xattr -rd com.apple.quarantine /Applications/Stack.app
+   → Open System Settings > Privacy & Security
+   → Scroll down to the Security section
+   → Click "Open Anyway" next to Stack
+   → Enter your password if prompted
 
-   Then launch normally.
+   Stack will open normally after that.
 
 ─────────────────────────────
 stack.swendl.com
