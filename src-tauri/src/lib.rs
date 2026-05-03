@@ -9,7 +9,7 @@ pub mod state;
 
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, CheckMenuItem, Menu, MenuBuilder, MenuItem, SubmenuBuilder};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 #[cfg(target_os = "macos")]
 use tauri::Runtime;
 #[cfg(target_os = "macos")]

@@ -6,21 +6,46 @@ on:
       - 'v*'
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+          - os: windows-latest
+
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          name: Stack ${{ github.ref_name }}
-          body: |
-            Download Stack below — attach the built `.dmg` (macOS) and `.exe` (Windows) files to this release.
+          node-version: 20
+          cache: npm
 
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build and upload to release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Stack ${{ github.ref_name }}
+          releaseBody: |
             Visit [stack.swendl.com](https://stack.swendl.com) for more information.
-          draft: false
+          releaseDraft: false
           prerelease: false
