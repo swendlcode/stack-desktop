@@ -35,6 +35,12 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Set version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+
       - name: Install frontend dependencies
         run: npm install
 
