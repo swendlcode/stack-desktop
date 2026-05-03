@@ -50,6 +50,17 @@ export default function App() {
       clearSelection();
     }
   }, [activePage, clearSelection]);
+
+  // Prevent external files being dropped into the app window.
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    document.addEventListener('dragover', prevent);
+    document.addEventListener('drop', prevent);
+    return () => {
+      document.removeEventListener('dragover', prevent);
+      document.removeEventListener('drop', prevent);
+    };
+  }, []);
   const { data: watchedFolders = [], isLoading: watchedLoading } = useQuery({
     queryKey: ['watched-folders'],
     queryFn: () => libraryService.getWatchedFolders(),

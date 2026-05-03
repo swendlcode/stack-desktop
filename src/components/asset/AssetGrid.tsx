@@ -45,6 +45,11 @@ export function AssetGrid({
   const editorHeight = useUiStore((s) => s.editorHeight);
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const selectedIndexRef = useRef<number | null>(null);
+  const setSelectedIndexSync = useCallback((idx: number | null) => {
+    selectedIndexRef.current = idx;
+    setSelectedIndex(idx);
+  }, []);
   const [scrollMargin, setScrollMargin] = useState(0);
   const prevEditorHeight = useRef(editorHeight);
 
@@ -152,7 +157,7 @@ export function AssetGrid({
       pageInitializedRef.current = true;
       return;
     }
-    setSelectedIndex(0);
+    setSelectedIndexSync(0);
     measureScrollMargin();
     virtualizer.scrollToIndex(0, { align: 'start' });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,8 +167,8 @@ export function AssetGrid({
   useEffect(() => {
     if (!currentAsset) return;
     const idx = assets.findIndex((a) => a.id === currentAsset.id);
-    if (idx !== -1) setSelectedIndex(idx);
-  }, [currentAsset, assets]);
+    if (idx !== -1) setSelectedIndexSync(idx);
+  }, [currentAsset, assets, setSelectedIndexSync]);
 
   const playAsset = useCallback(
     (asset: Asset) => {
@@ -217,7 +222,8 @@ export function AssetGrid({
     (e: React.KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        const current = selectedIndex ?? -1;
+        // Read from ref to avoid stale closure when keys repeat faster than renders
+        const current = selectedIndexRef.current ?? -1;
         const next = current + 1;
 
         if (next >= assets.length) {
@@ -225,21 +231,19 @@ export function AssetGrid({
           return;
         }
 
-        setSelectedIndex(next);
+        setSelectedIndexSync(next);
         const asset = assets[next];
         if (asset) {
-          // Fire audio immediately — before React state update
           const isEdited = editorAssetId !== null && asset.type === 'sample';
           if (isEdited) openEditor(asset.id);
           if (asset.type === 'sample' && !isEdited) audioEngine.playBuffer(asset.path, 0);
           playAsset(asset);
-          // Prefetch neighbours so they're ready
           audioEngine.prefetchAround(assets, next);
         }
 
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        const current = selectedIndex ?? 0;
+        const current = selectedIndexRef.current ?? 0;
         const next = current - 1;
 
         if (next < 0) {
@@ -247,7 +251,7 @@ export function AssetGrid({
           return;
         }
 
-        setSelectedIndex(next);
+        setSelectedIndexSync(next);
         const asset = assets[next];
         if (asset) {
           const isEdited = editorAssetId !== null && asset.type === 'sample';
@@ -260,13 +264,13 @@ export function AssetGrid({
       } else if (e.key === ' ' || e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
-        if (selectedIndex !== null) {
-          const asset = assets[selectedIndex];
+        const idx = selectedIndexRef.current;
+        if (idx !== null) {
+          const asset = assets[idx];
           if (asset) {
-            // Fire audio immediately like arrow keys do, before React state update
             const isEdited = editorAssetId !== null && asset.type === 'sample';
             if (isEdited) openEditor(asset.id);
-            
+
             const state = usePlayerStore.getState();
             if (state.currentAsset?.id === asset.id) {
               state.isPlaying ? state.stop() : state.resume();
@@ -280,7 +284,7 @@ export function AssetGrid({
         }
       }
     },
-    [selectedIndex, assets, page, totalPages, onPageChange, playAsset, editorAssetId, openEditor]
+    [assets, page, totalPages, onPageChange, playAsset, editorAssetId, openEditor, setSelectedIndexSync]
   );
 
   return (
@@ -357,7 +361,7 @@ export function AssetGrid({
                     if (selectedIndex !== null && assets.length > 0) {
                       // Go to the last item of the previous page
                       const lastIndex = assets.length - 1;
-                      setSelectedIndex(lastIndex);
+                      setSelectedIndexSync(lastIndex);
                       const asset = assets[lastIndex];
                       if (asset && asset.type === 'sample') {
                         const isEdited = editorAssetId !== null;
@@ -400,7 +404,7 @@ export function AssetGrid({
                     // Continue playback on the new page like arrow keys do
                     if (selectedIndex !== null && assets.length > 0) {
                       // Go to the first item of the next page
-                      setSelectedIndex(0);
+                      setSelectedIndexSync(0);
                       const asset = assets[0];
                       if (asset && asset.type === 'sample') {
                         const isEdited = editorAssetId !== null;

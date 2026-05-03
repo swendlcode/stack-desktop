@@ -20,7 +20,7 @@
         "minHeight": 600,
         "decorations": true,
         "acceptFirstMouse": true,
-        "dragDropEnabled": false,
+        "dragDropEnabled": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "trafficLightPosition": {
