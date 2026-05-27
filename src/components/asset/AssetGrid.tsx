@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { Asset } from '../../types';
+import { useQuery } from '@tanstack/react-query';
+import type { Asset, Settings } from '../../types';
 import { AssetRow } from './AssetRow';
 import { AssetColumnHeader, type AssetViewType } from './AssetColumnHeader';
 import { ResultsHeader } from '../browser/ResultsHeader';
@@ -8,6 +9,7 @@ import { usePlayerStore } from '../../stores/playerStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useSelectionStore } from '../../stores/selectionStore';
 import { audioEngine } from '../../services/audioEngine';
+import { settingsService } from '../../services/settingsService';
 import { ArrowLeft2, ArrowRight2 } from '../ui/icons';
 interface AssetGridProps {
   assets: Asset[];
@@ -20,6 +22,10 @@ interface AssetGridProps {
   viewType?: AssetViewType;
   /** Optional shared scroll container for non-sticky page headers. */
   scrollContainerRef?: RefObject<HTMLDivElement | null>;
+  /** Set false when the parent renders ResultsHeader externally. */
+  showResultsHeader?: boolean;
+  /** Set false when the parent renders AssetColumnHeader externally. */
+  showColumnHeader?: boolean;
 }
 
 const ROW_HEIGHT = 64;
@@ -34,6 +40,8 @@ export function AssetGrid({
   onPageChange,
   viewType = 'sample',
   scrollContainerRef,
+  showResultsHeader = true,
+  showColumnHeader = true,
 }: AssetGridProps) {
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const listViewportRef = useRef<HTMLDivElement | null>(null);
@@ -43,6 +51,15 @@ export function AssetGrid({
   const editorAssetId = useUiStore((s) => s.editorAssetId);
   const openEditor = useUiStore((s) => s.openEditor);
   const editorHeight = useUiStore((s) => s.editorHeight);
+
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ['settings'],
+    queryFn: () => settingsService.getSettings(),
+    staleTime: Infinity,
+  });
+  const showWaveform = settings?.showWaveform ?? true;
+  const showBpmBadge = settings?.showBpmBadge ?? true;
+  const showKeyBadge = settings?.showKeyBadge ?? true;
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const selectedIndexRef = useRef<number | null>(null);
@@ -288,12 +305,17 @@ export function AssetGrid({
   );
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Results header — separate section above the table */}
-      <ResultsHeader resultCount={totalCount} />
-
-      {/* Column header — outside scroll container, always visible */}
-      <AssetColumnHeader viewType={viewType} pageAssetIds={assets.map((a) => a.id)} />
+    <div className="flex flex-col">
+      {showResultsHeader && <ResultsHeader resultCount={totalCount} />}
+      {showColumnHeader && (
+        <AssetColumnHeader
+          viewType={viewType}
+          pageAssetIds={assets.map((a) => a.id)}
+          showWaveform={showWaveform}
+          showBpmBadge={showBpmBadge}
+          showKeyBadge={showKeyBadge}
+        />
+      )}
 
       {/* Scrollable list */}
       <div
@@ -337,6 +359,9 @@ export function AssetGrid({
                   viewType={viewType}
                   onOpenDetail={onOpenDetail}
                   onRowClick={(e) => handleRowClick(virtualRow.index, e)}
+                  showWaveform={showWaveform}
+                  showBpmBadge={showBpmBadge}
+                  showKeyBadge={showKeyBadge}
                 />
               </div>
             );

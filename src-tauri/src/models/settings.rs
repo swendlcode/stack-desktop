@@ -40,6 +40,11 @@ pub struct Settings {
     pub launch_at_startup: bool,
     /// Confirm before removing a watched folder
     pub confirm_folder_removal: bool,
+
+    // ── Browser ───────────────────────────────────────────────────────────
+    /// Stick the toolbar + column header to the top when scrolling inside a folder
+    #[serde(default = "default_true")]
+    pub sticky_toolbar: bool,
 }
 
 impl Default for Settings {
@@ -59,6 +64,7 @@ impl Default for Settings {
             enable_playground_mode: true,
             launch_at_startup: false,
             confirm_folder_removal: true,
+            sticky_toolbar: true,
         }
     }
 }

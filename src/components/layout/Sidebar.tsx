@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ScrollArea } from '../ui/ScrollArea';
 import { LibraryTree } from '../library/LibraryTree';
 import { useUiStore, MIN_WIDTH, type ActivePage } from '../../stores/uiStore';
@@ -12,8 +13,11 @@ import {
   MusicSquare,
   MusicFilter,
 } from '../ui/icons';
+import { settingsService } from '../../services/settingsService';
 import logoSvg from '../../assets/logo/logo.svg';
+import logoDarkSvg from '../../assets/logo/logo-dark.svg';
 import iconSvg from '../../assets/logo/icon.svg';
+import type { Settings } from '../../types';
 
 const NAV_ITEMS: Array<{ id: ActivePage; label: string; icon: typeof Element3 }> = [
   { id: 'browser',   label: 'Browser',   icon: Element3    },
@@ -26,6 +30,12 @@ const NAV_ITEMS: Array<{ id: ActivePage; label: string; icon: typeof Element3 }>
 ];
 
 export function Sidebar() {
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ['settings'],
+    queryFn: () => settingsService.getSettings(),
+  });
+  const logo = settings?.theme === 'light' ? logoDarkSvg : logoSvg;
+
   const activePage = useUiStore((s) => s.activePage);
   const showPluginsNav = useUiStore((s) => s.showPluginsNav);
   const showProjectsNav = useUiStore((s) => s.showProjectsNav);
@@ -157,7 +167,7 @@ export function Sidebar() {
       {/* Header row: logo only */}
       <div className="flex items-center px-4 pb-1 pt-3">
         <img
-          src={logoSvg}
+          src={logo}
           alt="Stack"
           className="w-auto select-none"
           style={{ height: '20px' }}

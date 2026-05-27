@@ -14,11 +14,16 @@ const MONO_CLS = 'mono text-xs font-medium uppercase tracking-widest text-gray-5
 
 export function AssetColumnHeader({
   viewType = 'sample',
-  /** All asset IDs on the current page — used for select-all logic */
   pageAssetIds = [],
+  showWaveform = true,
+  showBpmBadge = true,
+  showKeyBadge = true,
 }: {
   viewType?: AssetViewType;
   pageAssetIds?: string[];
+  showWaveform?: boolean;
+  showBpmBadge?: boolean;
+  showKeyBadge?: boolean;
 }) {
   const { selectedIds, setSelection, clearSelection } = useSelectionStore();
 
@@ -36,7 +41,7 @@ export function AssetColumnHeader({
 
   return (
     <div
-      className="sticky top-0 z-10 flex shrink-0 items-center border-y border-gray-700 bg-gray-900/95 backdrop-blur-sm"
+      className="sticky top-0 z-10 flex shrink-0 items-center border-b border-gray-700 bg-gray-900"
       style={{ height: 32, paddingLeft: '12px', paddingRight: '12px' }}
     >
       {/* ── CHECKBOX: select-all ── */}
@@ -63,23 +68,26 @@ export function AssetColumnHeader({
       <div className="flex min-w-0 flex-[1.15] items-center justify-center gap-1 sm:gap-3 px-2 sm:px-4">
         {(viewType === 'sample' || viewType === 'midi' || viewType === 'favorites') && (
           <>
-            <div
-              className="hidden lg:flex flex-1 items-center justify-center"
-              style={{ minWidth: '120px' }}
-            >
-              <span className={LABEL_CLS}>
-                {viewType === 'midi' ? 'MIDI' : viewType === 'favorites' ? 'Preview' : 'Waveform'}
-              </span>
-            </div>
+            {showWaveform && (
+              <div className="hidden lg:flex flex-1 min-w-0 overflow-hidden items-center justify-center">
+                <span className={LABEL_CLS}>
+                  {viewType === 'midi' ? 'MIDI' : viewType === 'favorites' ? 'Preview' : 'Waveform'}
+                </span>
+              </div>
+            )}
             <div className="shrink-0 text-right" style={{ minWidth: '40px' }}>
               <span className={MONO_CLS}>Time</span>
             </div>
-            <div className="shrink-0 text-center" style={{ minWidth: '50px' }}>
-              <span className={MONO_CLS}>Key</span>
-            </div>
-            <div className="shrink-0 text-center" style={{ minWidth: '45px' }}>
-              <span className={MONO_CLS}>BPM</span>
-            </div>
+            {showKeyBadge && (
+              <div className="shrink-0 text-center" style={{ minWidth: '50px' }}>
+                <span className={MONO_CLS}>Key</span>
+              </div>
+            )}
+            {showBpmBadge && (
+              <div className="shrink-0 text-center" style={{ minWidth: '45px' }}>
+                <span className={MONO_CLS}>BPM</span>
+              </div>
+            )}
           </>
         )}
 

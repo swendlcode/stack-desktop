@@ -1,12 +1,17 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAssets, PAGE_SIZE } from '../hooks/useAssets';
 import { AssetGrid } from '../components/asset/AssetGrid';
+import { AssetColumnHeader } from '../components/asset/AssetColumnHeader';
 import { BrowserToolbar } from '../components/browser/BrowserToolbar';
+import { ResultsHeader } from '../components/browser/ResultsHeader';
 import { FolderHero } from '../components/browser/FolderHero';
 import { ProjectHero } from '../components/browser/ProjectHero';
 import { useFilterStore } from '../stores/filterStore';
 import { useUiStore } from '../stores/uiStore';
 import { usePacks } from '../hooks/usePacks';
+import { settingsService } from '../services/settingsService';
+import type { Settings } from '../types';
 
 export function BrowserPage() {
   const [page, setPage] = useState(1);
@@ -31,6 +36,12 @@ export function BrowserPage() {
   const assets = data?.assets ?? [];
   const totalCount = data?.total ?? 0;
 
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ['settings'],
+    queryFn: () => settingsService.getSettings(),
+  });
+  const stickyToolbar = settings?.stickyToolbar ?? true;
+
   const browserViewMode = useUiStore((s) => s.browserViewMode);
   const { data: packs = [] } = usePacks();
   const viewType = filters.types[0] ?? 'favorites';
@@ -47,18 +58,30 @@ export function BrowserPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Unified scroll container so hero/toolbar scroll away with content */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+        {/* Hero scrolls away above the sticky toolbar band */}
         {filters.pathPrefix && atProjectRoot && (
           <ProjectHero pathPrefix={filters.pathPrefix} />
         )}
         {filters.pathPrefix && !atProjectRoot && (
           <FolderHero pathPrefix={filters.pathPrefix} totalCount={totalCount} />
         )}
-        <BrowserToolbar
-          resultCount={totalCount}
-          showPathChip={!filters.pathPrefix}
-        />
+
+        {/* Toolbar + column header — optionally sticky */}
+        <div className={stickyToolbar ? 'sticky top-0 z-10' : undefined}>
+          <BrowserToolbar
+            resultCount={totalCount}
+            showPathChip={!filters.pathPrefix}
+          />
+          <AssetColumnHeader
+            viewType={viewType}
+            pageAssetIds={assets.map((a) => a.id)}
+          />
+        </div>
+
+        {!isLoading && assets.length > 0 && (
+          <ResultsHeader resultCount={totalCount} />
+        )}
         {isLoading && assets.length === 0 ? (
           <div className="flex h-full items-center justify-center text-gray-500">
             Loading library...
@@ -75,6 +98,8 @@ export function BrowserPage() {
             onPageChange={setPage}
             viewType={viewType}
             scrollContainerRef={scrollRef}
+            showResultsHeader={false}
+            showColumnHeader={false}
           />
         )}
       </div>

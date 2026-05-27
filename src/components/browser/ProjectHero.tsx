@@ -7,7 +7,7 @@ import { PackCover } from '../asset/PackCover';
 import { PackDescription } from '../library/PackDescription';
 import { CoverEditorModal } from '../library/CoverEditorModal';
 import { Button } from '../ui/Button';
-import { Folder } from '../ui/icons';
+import { Edit2, Folder } from '../ui/icons';
 import { formatFileSize } from '../../utils/formatters';
 import {
   formatDeadline,
@@ -88,14 +88,14 @@ export function ProjectHero({ pathPrefix }: Props) {
         <button
           type="button"
           onClick={() => setCoverOpen(true)}
-          className="group relative overflow-hidden rounded-lg border border-transparent transition-colors hover:border-stack-fire focus:outline-none focus:ring-2 focus:ring-stack-fire"
+          className="group relative overflow-hidden rounded-lg border border-transparent transition-colors hover:border-stack-fire focus:outline-none focus:ring-2 focus:ring-stack-fire [transform:translateZ(0)]"
           title="Edit cover"
           aria-label="Edit project cover"
           style={{ width: 152, height: 152 }}
         >
           <PackCover packRoot={pathPrefix} packName={folderName} size="full" />
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 text-[10px] font-semibold uppercase tracking-widest text-transparent transition-all group-hover:bg-black/55 group-hover:text-stack-white">
-            Edit cover
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-transparent opacity-0 transition-all group-hover:bg-stack-fire group-hover:opacity-100">
+            <Edit2 size={28} color="#ffffff" variant="Bold" />
           </div>
         </button>
       </div>

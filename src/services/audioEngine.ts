@@ -57,7 +57,7 @@ class AudioEngine {
           .webkitAudioContext;
       this.ctx = new Ctor();
       this.gainNode = this.ctx.createGain();
-      this.gainNode.gain.value = this.volume;
+      this.gainNode.gain.value = this.volume * SAMPLE_GAIN_BOOST;
       this.gainNode.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') {

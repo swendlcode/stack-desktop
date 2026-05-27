@@ -7,7 +7,7 @@ import { PackCover } from '../asset/PackCover';
 import { PackDescription } from '../library/PackDescription';
 import { CoverEditorModal } from '../library/CoverEditorModal';
 import { formatCount, formatFileSize } from '../../utils/formatters';
-import { ArrowRight2 } from '../ui/icons';
+import { ArrowRight2, Edit2 } from '../ui/icons';
 
 interface Props {
   pathPrefix: string;
@@ -54,13 +54,13 @@ export function FolderHero({ pathPrefix, totalCount }: Props) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group relative shrink-0 overflow-hidden rounded-lg border border-transparent transition-colors hover:border-stack-fire focus:outline-none focus:ring-2 focus:ring-stack-fire"
+        className="group relative shrink-0 overflow-hidden rounded-lg border border-transparent transition-colors hover:border-stack-fire focus:outline-none focus:ring-2 focus:ring-stack-fire [transform:translateZ(0)]"
         title="Edit cover — paste, upload, or fetch from URL"
         aria-label="Edit folder cover"
       >
         <PackCover packRoot={pathPrefix} packName={folderName} size={72} />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 text-[10px] font-semibold uppercase tracking-widest text-transparent transition-all group-hover:bg-black/55 group-hover:text-stack-white">
-          Edit cover
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-transparent opacity-0 transition-all group-hover:bg-stack-fire group-hover:opacity-100">
+          <Edit2 size={20} color="#ffffff" variant="Bold" />
         </div>
       </button>
 

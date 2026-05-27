@@ -50,6 +50,9 @@ interface AssetRowProps {
   onPreview?: (asset: Asset) => void;
   onOpenDetail?: (asset: Asset) => void;
   onRowClick?: (e: React.MouseEvent) => void;
+  showWaveform?: boolean;
+  showBpmBadge?: boolean;
+  showKeyBadge?: boolean;
 }
 
 export const AssetRow = memo(function AssetRow({
@@ -61,6 +64,9 @@ export const AssetRow = memo(function AssetRow({
   onPreview,
   onOpenDetail,
   onRowClick,
+  showWaveform = true,
+  showBpmBadge = true,
+  showKeyBadge = true,
 }: AssetRowProps) {
   // Tier 1: ref-stable fields every row needs. Shallow-compared so a
   // currentTime tick doesn't invalidate this selector for any row.
@@ -471,40 +477,39 @@ export const AssetRow = memo(function AssetRow({
         ) : (
           /* Samples / MIDI / Favorites: Waveform · Time · Key · BPM */
           <>
-            <div
-              className="hidden lg:flex flex-1 items-center min-w-0"
-              style={{ minWidth: COL.waveMinW }}
-            >
-              {asset.type === "sample" ? (
-                <WaveformViewer
-                  assetId={asset.id}
-                  height={36}
-                  progress={progress}
-                  onSeek={
-                    isActive
-                      ? (fraction) => {
-                          const { seekTo, duration: d } =
-                            usePlayerStore.getState();
-                          if (seekTo && d > 0) seekTo(fraction * d);
-                        }
-                      : undefined
-                  }
-                />
-              ) : asset.type === "midi" ? (
-                <MidiViewer
-                  notes={(asset.meta as MidiMeta)?.pianoRoll ?? []}
-                  height={36}
-                />
-              ) : (
-                <div className="flex h-9 w-full items-center justify-center rounded-lg bg-gray-800">
-                  <Icon
-                    size={18}
-                    color="var(--color-text-muted)"
-                    variant="Linear"
+            {showWaveform && (
+              <div className="hidden lg:flex flex-1 min-w-0 overflow-hidden items-center">
+                {asset.type === "sample" ? (
+                  <WaveformViewer
+                    assetId={asset.id}
+                    height={36}
+                    progress={progress}
+                    onSeek={
+                      isActive
+                        ? (fraction) => {
+                            const { seekTo, duration: d } =
+                              usePlayerStore.getState();
+                            if (seekTo && d > 0) seekTo(fraction * d);
+                          }
+                        : undefined
+                    }
                   />
-                </div>
-              )}
-            </div>
+                ) : asset.type === "midi" ? (
+                  <MidiViewer
+                    notes={(asset.meta as MidiMeta)?.pianoRoll ?? []}
+                    height={36}
+                  />
+                ) : (
+                  <div className="flex h-9 w-full items-center justify-center rounded-lg bg-gray-800">
+                    <Icon
+                      size={18}
+                      color="var(--color-text-muted)"
+                      variant="Linear"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
             <div
               className="mono shrink-0 text-right text-xs sm:text-sm text-gray-500"
@@ -513,31 +518,35 @@ export const AssetRow = memo(function AssetRow({
               {formatDuration(asset.durationMs)}
             </div>
 
-            <div
-              className="mono shrink-0 text-center text-xs sm:text-sm"
-              style={{ minWidth: "50px" }}
-            >
-              {asset.keyNote ? (
-                <span className="text-stack-white font-medium">
-                  {formatKey(asset.keyNote, asset.keyScale)}
-                </span>
-              ) : (
-                <span className="text-gray-700">—</span>
-              )}
-            </div>
+            {showKeyBadge && (
+              <div
+                className="mono shrink-0 text-center text-xs sm:text-sm"
+                style={{ minWidth: "50px" }}
+              >
+                {asset.keyNote ? (
+                  <span className="text-stack-white font-medium">
+                    {formatKey(asset.keyNote, asset.keyScale)}
+                  </span>
+                ) : (
+                  <span className="text-gray-700">—</span>
+                )}
+              </div>
+            )}
 
-            <div
-              className="mono shrink-0 text-center text-xs sm:text-sm"
-              style={{ minWidth: "45px" }}
-            >
-              {asset.bpm != null ? (
-                <span className="text-stack-white font-medium">
-                  {formatBpm(asset.bpm)}
-                </span>
-              ) : (
-                <span className="text-gray-700">—</span>
-              )}
-            </div>
+            {showBpmBadge && (
+              <div
+                className="mono shrink-0 text-center text-xs sm:text-sm"
+                style={{ minWidth: "45px" }}
+              >
+                {asset.bpm != null ? (
+                  <span className="text-stack-white font-medium">
+                    {formatBpm(asset.bpm)}
+                  </span>
+                ) : (
+                  <span className="text-gray-700">—</span>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

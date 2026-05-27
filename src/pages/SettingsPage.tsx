@@ -182,6 +182,7 @@ const DEFAULT_SETTINGS: Settings = {
   enablePlaygroundMode: true,
   launchAtStartup: false,
   confirmFolderRemoval: true,
+  stickyToolbar: true,
 };
 
 export function SettingsPage() {
@@ -413,6 +414,15 @@ export function SettingsPage() {
             <Toggle
               checked={settings.showKeyBadge}
               onChange={(v) => updateAndSave({ showKeyBadge: v })}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Sticky toolbar in browser"
+            description="Keep the filter toolbar and column header pinned when scrolling inside a pack or folder."
+          >
+            <Toggle
+              checked={settings.stickyToolbar}
+              onChange={(v) => updateAndSave({ stickyToolbar: v })}
             />
           </SettingRow>
           <SettingRow

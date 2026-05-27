@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { usePlayerStore } from '../stores/playerStore';
 import { useUiStore } from '../stores/uiStore';
 import { assetService } from '../services/assetService';
 import { audioEngine } from '../services/audioEngine';
-import type { Asset, MidiMeta, MidiNote } from '../types';
+import type { Asset, MidiMeta, MidiNote, Settings } from '../types';
 
 function midiToFrequency(pitch: number): number {
   return 440 * Math.pow(2, (pitch - 69) / 12);
@@ -130,6 +131,8 @@ function selectPlayableMidiNotes(
  *    re-starting it, avoiding double-play.
  */
 export function usePlayer() {
+  const qc = useQueryClient();
+
   // Fallback HTML audio element — only used when buffer isn't cached yet
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fallbackActiveRef = useRef(false);
@@ -168,6 +171,27 @@ export function usePlayer() {
   } = usePlayerStore();
 
   const editorAssetId = useUiStore((s) => s.editorAssetId);
+
+  // Ref so end-of-track callbacks always call the latest version without
+  // being listed as effect dependencies (avoids stale closure + re-runs).
+  const handleTrackEndRef = useRef<() => void>(() => {});
+  handleTrackEndRef.current = () => {
+    const settings = qc.getQueryData<Settings>(['settings']);
+    if (settings?.autoPlayNext) {
+      const { currentAsset, playlist, play } = usePlayerStore.getState();
+      const idx = currentAsset
+        ? playlist.findIndex((a) => a.id === currentAsset.id)
+        : -1;
+      const next = playlist[idx + 1];
+      if (next) {
+        if (next.type === 'sample') audioEngine.playBuffer(next.path, 0);
+        play(next);
+        audioEngine.prefetchAround(playlist, idx + 1);
+        return;
+      }
+    }
+    pause();
+  };
 
   // ─── Volume sync (no playback side-effects) ────────────────────────────
 
@@ -355,10 +379,10 @@ export function usePlayer() {
     const remainingMs = Math.max(0, (durationSec - offsetSec) * 1000);
     midiEndTimerRef.current = window.setTimeout(() => {
       if (generationRef.current !== gen) return;
-      pause();
       setCurrentTime(durationSec);
       midiOffsetRef.current = durationSec;
       stopMidiNodes();
+      handleTrackEndRef.current();
     }, remainingMs + 40);
   };
 
@@ -380,7 +404,7 @@ export function usePlayer() {
     // Wire engine callbacks → store
     audioEngine.onTimeUpdate = (t) => setCurrentTime(t);
     audioEngine.onDuration = (d) => setDuration(d);
-    audioEngine.onEnded = () => pause();
+    audioEngine.onEnded = () => handleTrackEndRef.current();
 
     // Fallback HTML audio events
     const onFallbackTime = () => {
@@ -392,7 +416,7 @@ export function usePlayer() {
     const onFallbackEnd = () => {
       if (fallbackActiveRef.current) {
         fallbackActiveRef.current = false;
-        pause();
+        handleTrackEndRef.current();
       }
     };
     audio.addEventListener('timeupdate', onFallbackTime);

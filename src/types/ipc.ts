@@ -27,4 +27,6 @@ export interface Settings {
   // Application
   launchAtStartup: boolean;
   confirmFolderRemoval: boolean;
+  // Browser
+  stickyToolbar: boolean;
 }
