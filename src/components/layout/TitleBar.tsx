@@ -40,8 +40,8 @@ export function TitleBar() {
   const toggleTheme = () => {
     if (!settings) return;
     const next = theme === 'dark' ? 'light' : 'dark';
-    applyTheme(next);
-    patchCachedSettings(qc, next);
+    applyTheme(next, settings.accentColor);
+    patchCachedSettings(qc, { theme: next });
     settingsService
       .updateSettings({ ...settings, theme: next })
       .then((updated) => qc.setQueryData(['settings'], updated))

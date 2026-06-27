@@ -100,7 +100,7 @@ impl AssetRepository {
         // Each facet was previously ORDER BY cnt DESC inside its own query.
         // The UNION ALL drops that, so re-sort each bucket on the Rust side.
         for v in [&mut instruments, &mut subtypes, &mut energy_levels, &mut textures, &mut spaces, &mut roles] {
-            v.sort_by(|a, b| b.count.cmp(&a.count));
+            v.sort_by_key(|c| std::cmp::Reverse(c.count));
         }
 
         Ok(FacetCounts { instruments, subtypes, energy_levels, textures, spaces, roles })
@@ -145,10 +145,7 @@ impl AssetRepository {
         let mut conn = self.db.get()?;
         let tags = serde_json::to_string(&asset.user_tags)?;
         let meta = serde_json::to_string(&asset.meta)?;
-        let waveform = match &asset.waveform_data {
-            Some(v) => Some(waveform_to_base64(v)),
-            None => None,
-        };
+        let waveform = asset.waveform_data.as_ref().map(|v| waveform_to_base64(v));
         let tx = conn.transaction()?;
 
         tx.execute(

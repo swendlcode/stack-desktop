@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { usePlayerStore } from '../stores/playerStore';
 import { useUiStore } from '../stores/uiStore';
 import { assetService } from '../services/assetService';
+import { settingsService } from '../services/settingsService';
 import { audioEngine } from '../services/audioEngine';
 import type { Asset, MidiMeta, MidiNote, Settings } from '../types';
 
@@ -133,6 +134,19 @@ function selectPlayableMidiNotes(
 export function usePlayer() {
   const qc = useQueryClient();
 
+  // Observe settings directly here so the auto-play-next decision never depends
+  // on another hook (e.g. useTheme) having populated the ['settings'] cache.
+  // PlayerBar is an observer, so the query is always fetched and kept fresh.
+  const { data: playerSettings } = useQuery<Settings>({
+    queryKey: ['settings'],
+    queryFn: () => settingsService.getSettings(),
+    staleTime: 30_000,
+  });
+  // Mirror into a ref so end-of-track callbacks read the latest value without
+  // being re-created or capturing a stale closure.
+  const autoPlayNextRef = useRef(false);
+  autoPlayNextRef.current = playerSettings?.autoPlayNext ?? false;
+
   // Fallback HTML audio element — only used when buffer isn't cached yet
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fallbackActiveRef = useRef(false);
@@ -176,8 +190,13 @@ export function usePlayer() {
   // being listed as effect dependencies (avoids stale closure + re-runs).
   const handleTrackEndRef = useRef<() => void>(() => {});
   handleTrackEndRef.current = () => {
-    const settings = qc.getQueryData<Settings>(['settings']);
-    if (settings?.autoPlayNext) {
+    // Read the live setting from the ref (fed by the settings query above), with
+    // the query cache as a backup. Either way this no longer silently fails when
+    // the cache happens to be empty.
+    const autoPlayNext =
+      autoPlayNextRef.current ||
+      qc.getQueryData<Settings>(['settings'])?.autoPlayNext === true;
+    if (autoPlayNext) {
       const { currentAsset, playlist, play } = usePlayerStore.getState();
       const idx = currentAsset
         ? playlist.findIndex((a) => a.id === currentAsset.id)

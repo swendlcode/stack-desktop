@@ -216,10 +216,7 @@ pub fn analyze(path: &Path) -> Result<AudioAnalysis> {
 }
 
 pub fn should_analyze_key(instrument: &Option<String>) -> bool {
-    match instrument.as_deref() {
-        Some("drum") | Some("fx") => false,
-        _ => true,
-    }
+    !matches!(instrument.as_deref(), Some("drum") | Some("fx"))
 }
 
 /// Resample a peak buffer to exactly `target` bars using peak-hold per bucket.
@@ -256,7 +253,7 @@ fn resample_peaks(peaks: &[f32], target: usize) -> Vec<f32> {
 }
 
 #[inline]
-fn normalize(v: &mut Vec<f32>) {
+fn normalize(v: &mut [f32]) {
     let max = v.iter().cloned().fold(0.0f32, f32::max);
     if max > 0.001 {
         let scale = 1.0 / max;

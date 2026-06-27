@@ -47,10 +47,10 @@ impl QueryProcessor {
             .trim()
             .chars()
             .map(|c| {
+                // Keep alphanumerics/whitespace; everything else (incl. - and _)
+                // collapses to a space so tokens split cleanly.
                 if c.is_alphanumeric() || c.is_whitespace() {
                     c
-                } else if c == '-' || c == '_' {
-                    ' '
                 } else {
                     ' '
                 }

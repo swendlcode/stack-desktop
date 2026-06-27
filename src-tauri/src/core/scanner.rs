@@ -133,7 +133,7 @@ impl Scanner {
             return true;
         }
 
-        if SKIP_NAMES.iter().any(|s| *s == name) {
+        if SKIP_NAMES.contains(&name) {
             return true;
         }
 

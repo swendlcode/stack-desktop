@@ -80,9 +80,7 @@ impl NodeBuilder {
 
     fn finish(self) -> TreeNode {
         let children = self
-            .children
-            .into_iter()
-            .map(|(_, v)| v.finish())
+            .children.into_values().map(|v| v.finish())
             .collect();
         TreeNode {
             name: self.root_name,

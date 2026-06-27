@@ -2,13 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { invoke } from '@tauri-apps/api/core';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BrowserToolbar } from '../components/browser/BrowserToolbar';
 import { AssetGrid } from '../components/asset/AssetGrid';
 import { PAGE_SIZE, useAssets } from '../hooks/useAssets';
 import { useFilterStore } from '../stores/filterStore';
 import { PlayerBar } from '../components/player/PlayerBar';
-import { CloseCircle } from '../components/ui/icons';
-import logo from '../assets/logo/logo.svg';
+import { CloseCircle, Sun, Moon } from '../components/ui/icons';
+import { settingsService } from '../services/settingsService';
+import { applyTheme, patchCachedSettings } from '../hooks/useTheme';
+import type { Settings } from '../types';
+import { LogoWordmark } from '../components/ui/Logo';
 
 export function OverlayPage() {
   const [page, setPage] = useState(1);
@@ -18,6 +22,26 @@ export function OverlayPage() {
   const totalCount = data?.total ?? 0;
   const setPathPrefix = useFilterStore((s) => s.setPathPrefix);
   const setTypes = useFilterStore((s) => s.setTypes);
+
+  const qc = useQueryClient();
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ['settings'],
+    queryFn: () => settingsService.getSettings(),
+  });
+  const theme = settings?.theme === 'light' ? 'light' : 'dark';
+
+  // Optimistic flip: paint instantly via DOM + cache, then persist. Mirrors the
+  // main TitleBar toggle so the overlay shares one theme source of truth.
+  const toggleTheme = () => {
+    if (!settings) return;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next, settings.accentColor);
+    patchCachedSettings(qc, { theme: next });
+    settingsService
+      .updateSettings({ ...settings, theme: next })
+      .then((updated) => qc.setQueryData(['settings'], updated))
+      .catch(() => qc.invalidateQueries({ queryKey: ['settings'] }));
+  };
 
   useEffect(() => {
     const unlistenPromise = listen('stack://overlay-opened', () => {
@@ -75,11 +99,30 @@ export function OverlayPage() {
             className="drag-region flex min-w-0 flex-1 cursor-move items-center"
             data-tauri-drag-region
           >
-            <img src={logo} alt="Stack" className="h-5 w-auto" />
+            <LogoWordmark height={20} className="w-auto" />
           </div>
           <button
             type="button"
-            className="no-drag ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-stack-white/90 transition-colors hover:bg-gray-800 hover:text-stack-white"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleTheme();
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
+            disabled={!settings}
+            className="no-drag inline-flex h-6 w-6 items-center justify-center rounded text-stack-white/90 transition-colors hover:bg-gray-800 hover:text-stack-white disabled:opacity-40"
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? (
+              <Sun size={16} color="currentColor" variant="Linear" />
+            ) : (
+              <Moon size={16} color="currentColor" variant="Linear" />
+            )}
+          </button>
+          <button
+            type="button"
+            className="no-drag inline-flex h-6 w-6 items-center justify-center rounded text-stack-white/90 transition-colors hover:bg-gray-800 hover:text-stack-white"
             onMouseDown={(e) => e.stopPropagation()}
             onMouseUp={(e) => e.stopPropagation()}
             onClick={async (e) => {

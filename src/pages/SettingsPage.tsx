@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { libraryService } from '../services/libraryService';
 import { settingsService } from '../services/settingsService';
+import { audioEngine } from '../services/audioEngine';
 import { usePlayerStore } from '../stores/playerStore';
+import { isTauri } from '../lib/tauri-core';
 import { Button } from '../components/ui/Button';
 import {
   Trash,
@@ -13,8 +16,19 @@ import {
   VolumeMute,
   ArrowDown2,
   HeartAdd,
+  Global,
+  Copy,
+  CopySuccess,
 } from '../components/ui/icons';
+
+// URL the embedded HTTP server serves the UI on. In dev the bundled assets
+// aren't available on the server port, so point at the Vite dev server (which
+// proxies IPC to the backend); in production the server serves the bundle.
+const WEB_UI_URL = import.meta.env.DEV
+  ? 'http://localhost:1420'
+  : 'http://localhost:9870';
 import { Slider } from '../components/ui/Slider';
+import { ThemeSettings } from '../components/settings/ThemeSettings';
 import { packQueryKeys } from '../hooks/usePacks';
 import { assetQueryKeys } from '../hooks/useAssets';
 import { libraryTreeKey } from '../hooks/useLibraryTree';
@@ -50,7 +64,7 @@ function SettingSection({ title, description, children }: {
 
 function SettingRow({ label, description, children }: {
   label: string;
-  description?: string;
+  description?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -165,6 +179,236 @@ function FolderInfoRow({ folder, onRemove }: { folder: WatchedFolder; onRemove: 
   );
 }
 
+// ─── Audio output ────────────────────────────────────────────────────────────────
+// Output device + sample-rate selection. Sample rate always works (rebuilds the
+// AudioContext). Output-device routing depends on setSinkId, which WKWebView may
+// not support — so that control is shown only when the runtime can actually use it.
+
+const SAMPLE_RATE_OPTIONS = [
+  { value: '', label: 'System default' },
+  { value: '44100', label: '44.1 kHz' },
+  { value: '48000', label: '48 kHz' },
+  { value: '88200', label: '88.2 kHz' },
+  { value: '96000', label: '96 kHz' },
+];
+
+function AudioOutputSettings() {
+  const supportsOutput = audioEngine.supportsOutputSelection();
+  const [devices, setDevices] = useState<Array<{ deviceId: string; label: string }>>([]);
+  const [sinkId, setSinkId] = useState<string>(() => audioEngine.getPreferredSinkId() ?? '');
+  const [sampleRate, setSampleRate] = useState<string>(
+    () => String(audioEngine.getPreferredSampleRate() ?? '')
+  );
+
+  const [unlocking, setUnlocking] = useState(false);
+
+  useEffect(() => {
+    if (!supportsOutput) return;
+    audioEngine.listOutputDevices().then(setDevices).catch(() => {});
+  }, [supportsOutput]);
+
+  const usableDevices = devices.filter((d) => d.deviceId && d.deviceId !== 'default');
+  const deviceOptions = [
+    { value: '', label: 'System default' },
+    ...usableDevices.map((d, i) => ({ value: d.deviceId, label: d.label || `Output ${i + 1}` })),
+  ];
+
+  const labelsHidden = supportsOutput && devices.some((d) => d.deviceId && !d.label);
+  const needsUnlock = supportsOutput && (usableDevices.length === 0 || labelsHidden);
+
+  const unlock = async () => {
+    setUnlocking(true);
+    try {
+      setDevices(await audioEngine.unlockOutputDevices());
+    } finally {
+      setUnlocking(false);
+    }
+  };
+
+  return (
+    <SettingSection
+      title="Audio output"
+      description="Choose where previews play and at what sample rate."
+    >
+      {supportsOutput ? (
+        <SettingRow
+          label="Output device"
+          description={
+            needsUnlock
+              ? 'macOS only reveals device names after granting audio access. Stack uses it solely to label outputs — it never records.'
+              : 'Send sample previews to a specific output.'
+          }
+        >
+          {needsUnlock ? (
+            <Button variant="secondary" size="sm" onClick={unlock} disabled={unlocking}>
+              {unlocking ? 'Requesting…' : 'Show devices'}
+            </Button>
+          ) : (
+            <Select
+              value={sinkId}
+              options={deviceOptions}
+              onChange={(v) => { setSinkId(v); audioEngine.setOutputDevice(v || null); }}
+            />
+          )}
+        </SettingRow>
+      ) : (
+        <SettingRow
+          label="Output device"
+          description="This system doesn't let the app pick an output device. Previews follow your Mac's default output (change it in System Settings → Sound)."
+        >
+          <span className="mono text-xs text-gray-500">Unavailable</span>
+        </SettingRow>
+      )}
+      <SettingRow
+        label="Sample rate"
+        description="Higher rates can sound cleaner but use more CPU. Changing this restarts the audio engine."
+      >
+        <Select
+          value={sampleRate}
+          options={SAMPLE_RATE_OPTIONS}
+          onChange={(v) => {
+            setSampleRate(v);
+            audioEngine.setPreferredSampleRate(v ? Number(v) : null);
+          }}
+        />
+      </SettingRow>
+    </SettingSection>
+  );
+}
+
+// ─── Audio diagnostics ──────────────────────────────────────────────────────────
+// Surfaces the audio engine's live state so users on machines where preview is
+// silent (e.g. the macOS Tahoe "scrubber moves, no sound" report) can send us the
+// numbers. The Test tone button bypasses decode/buffer to isolate the output layer.
+
+function AudioDiagnostics() {
+  const [snap, setSnap] = useState(() => audioEngine.debugSnapshot());
+  const [toneResult, setToneResult] = useState<string>('');
+  const [verbose, setVerbose] = useState<boolean>(() => {
+    try { return localStorage.getItem('stack:audioDebug') === '1'; } catch { return false; }
+  });
+
+  const refresh = () => setSnap(audioEngine.debugSnapshot());
+
+  const runTone = async () => {
+    try {
+      const state = await audioEngine.playTestTone();
+      setToneResult(`played (context: ${state})`);
+    } catch (e) {
+      setToneResult(`error: ${String(e)}`);
+    }
+    refresh();
+  };
+
+  const toggleVerbose = (v: boolean) => {
+    setVerbose(v);
+    try {
+      if (v) localStorage.setItem('stack:audioDebug', '1');
+      else localStorage.removeItem('stack:audioDebug');
+    } catch { /* ignore */ }
+  };
+
+  const rows: Array<[string, string]> = [
+    ['Context', snap.ctxExists ? snap.ctxState : 'not created'],
+    ['Sample rate', snap.sampleRate ? `${snap.sampleRate} Hz` : '—'],
+    ['Output gain', snap.gainValue != null ? snap.gainValue.toFixed(2) : '—'],
+    ['Volume', snap.volume.toFixed(2)],
+    ['Output latency', snap.outputLatency != null ? `${(snap.outputLatency * 1000).toFixed(1)} ms` : '—'],
+    ['User gesture active', snap.userActivationActive === null ? 'unknown' : String(snap.userActivationActive)],
+    ['Decoded in cache', String(snap.cacheSize)],
+  ];
+
+  return (
+    <SettingSection
+      title="Audio diagnostics"
+      description="If preview playback is silent, click Test tone and send us these values."
+    >
+      <div className="rounded-md border border-gray-700 bg-gray-800 p-4">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">{k}</span>
+              <span className="mono text-xs text-gray-200">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <Button variant="primary" size="sm" onClick={runTone}>Test tone</Button>
+          <Button variant="secondary" size="sm" onClick={refresh}>Refresh</Button>
+          {toneResult && <span className="mono text-xs text-gray-400">{toneResult}</span>}
+        </div>
+      </div>
+      <SettingRow
+        label="Verbose audio logging"
+        description="Print detailed playback traces to the developer console (for support). Reload after enabling."
+      >
+        <Toggle checked={verbose} onChange={toggleVerbose} />
+      </SettingRow>
+    </SettingSection>
+  );
+}
+
+// ─── Web access ────────────────────────────────────────────────────────────────
+// Opens the same UI in the user's default browser. While the desktop app runs it
+// exposes the identical backend + library on localhost, so the browser tab shares
+// the same database and samples — it's the same Stack, just in a browser.
+
+function WebAccessSettings() {
+  const [copied, setCopied] = useState(false);
+
+  const open = () => {
+    // Desktop: hand the URL to the OS so it opens in the real browser.
+    // Browser tab: it's already in a browser — just open another tab.
+    if (isTauri) openUrl(WEB_UI_URL).catch(() => {});
+    else window.open(WEB_UI_URL, '_blank', 'noopener');
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(WEB_UI_URL);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  return (
+    <SettingSection
+      title="Web access"
+      description="Open Stack in your browser. While the app is running it shares the same backend, database and samples — nothing is uploaded."
+    >
+      <SettingRow
+        label="Open in browser"
+        description={
+          <>Same UI at <span className="mono text-gray-400">{WEB_UI_URL}</span>. Works in Chrome, Safari or any browser on this machine.</>
+        }
+      >
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={
+              copied
+                ? <CopySuccess size={14} variant="Linear" color="currentColor" />
+                : <Copy size={14} variant="Linear" color="currentColor" />
+            }
+            onClick={copy}
+          >
+            {copied ? 'Copied' : 'Copy link'}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Global size={14} variant="Linear" color="currentColor" />}
+            onClick={open}
+          >
+            Open in browser
+          </Button>
+        </div>
+      </SettingRow>
+    </SettingSection>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SETTINGS: Settings = {
@@ -175,6 +419,7 @@ const DEFAULT_SETTINGS: Settings = {
   watchForChanges: true,
   pageSize: 100,
   theme: 'dark',
+  accentColor: null,
   showWaveform: true,
   showBpmBadge: true,
   showKeyBadge: true,
@@ -324,6 +569,9 @@ export function SettingsPage() {
           </SettingRow>
         </SettingSection>
 
+        {/* ── Web access ── */}
+        <WebAccessSettings />
+
         {/* ── Playback ── */}
         <SettingSection
           title="Playback"
@@ -353,24 +601,19 @@ export function SettingsPage() {
           </SettingRow>
         </SettingSection>
 
+        {/* ── Theme ── */}
+        <SettingSection
+          title="Theme"
+          description="Pick a preset or choose your own accent. Applies to the entire app."
+        >
+          <ThemeSettings settings={settings} onChange={updateAndSave} />
+        </SettingSection>
+
         {/* ── Appearance ── */}
         <SettingSection
           title="Appearance"
           description="Customise what's shown in the asset list."
         >
-          <SettingRow
-            label="Theme"
-            description="Switch between dark and light. Applies to the entire app."
-          >
-            <Select
-              value={settings.theme}
-              options={[
-                { value: 'dark', label: 'Dark' },
-                { value: 'light', label: 'Light' },
-              ]}
-              onChange={(v) => updateAndSave({ theme: v === 'light' ? 'light' : 'dark' })}
-            />
-          </SettingRow>
           <SettingRow
             label="Show Plugins in sidebar"
             description="Display the Plugins section in the left sidebar navigation."
@@ -494,6 +737,12 @@ export function SettingsPage() {
             />
           </SettingRow>
         </SettingSection>
+
+        {/* ── Audio output ── */}
+        <AudioOutputSettings />
+
+        {/* ── Audio diagnostics ── */}
+        <AudioDiagnostics />
 
         {/* ── About ── */}
         <SettingSection title="About">

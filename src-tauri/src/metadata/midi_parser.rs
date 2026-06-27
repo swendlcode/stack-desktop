@@ -25,10 +25,12 @@ pub fn parse(path: &Path) -> Result<MidiMetadata> {
     let bytes = fs::read(path)?;
     let smf = Smf::parse(&bytes).map_err(|e| StackError::Other(format!("midi: {}", e)))?;
 
-    let mut meta = MidiMetadata::default();
-    meta.tracks = smf.tracks.len().min(u8::MAX as usize) as u8;
-    meta.note_range_low = 127;
-    meta.note_range_high = 0;
+    let mut meta = MidiMetadata {
+        tracks: smf.tracks.len().min(u8::MAX as usize) as u8,
+        note_range_low: 127,
+        note_range_high: 0,
+        ..Default::default()
+    };
 
     let ticks_per_beat = match smf.header.timing {
         midly::Timing::Metrical(n) => u16::from(n) as u32,

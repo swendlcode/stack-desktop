@@ -2,13 +2,13 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
-import { applyTheme, readPersistedTheme } from './hooks/useTheme';
+import { applyTheme, readPersistedTheme, readPersistedAccent } from './hooks/useTheme';
 import './index.css';
 
 // Apply the user's last-chosen theme BEFORE React mounts, so the first paint
 // matches their preference instead of flashing dark and then swapping when
 // settings load from SQLite. The settings query reconciles after mount.
-applyTheme(readPersistedTheme());
+applyTheme(readPersistedTheme(), readPersistedAccent());
 
 // Global unhandled error logging
 window.addEventListener('error', (e) => {

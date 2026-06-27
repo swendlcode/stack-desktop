@@ -5,7 +5,11 @@ pub mod error;
 pub mod metadata;
 pub mod models;
 pub mod search;
+pub mod server;
 pub mod state;
+
+/// Port the embedded HTTP server (browser access) listens on.
+const WEB_SERVER_PORT: u16 = 9870;
 
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, CheckMenuItem, Menu, MenuBuilder, MenuItem, SubmenuBuilder};
@@ -55,8 +59,11 @@ fn toggle_overlay(app: &tauri::AppHandle) {
         .always_on_top(true)
         .visible_on_all_workspaces(true)
         .skip_taskbar(true)
+        // Open wide enough to clear the lg breakpoint (1024px) so the sample
+        // waveform column is visible out of the box. min stays compact so the
+        // window can be stretched in/out left-to-right to show/hide waveforms.
         .min_inner_size(760.0, 560.0)
-        .inner_size(980.0, 760.0)
+        .inner_size(1180.0, 780.0)
         .build();
 
     if let Ok(win) = win {
@@ -260,6 +267,10 @@ pub fn run() {
             let state = AppState::init(app.handle().clone())?;
             app.manage(state);
 
+            // Expose the same UI + backend over localhost so it can be opened
+            // in any browser while the desktop app is running.
+            crate::server::start(app.handle().clone(), WEB_SERVER_PORT);
+
             // Register global overlay shortcut. We register both variants explicitly
             // to approximate "CmdOrCtrl+Shift+O" across platforms.
             let ctrl = Shortcut::new(
@@ -277,7 +288,7 @@ pub fn run() {
             {
                 let menu = build_macos_menu(app)?;
                 app.set_menu(menu)?;
-                update_navigate_checks(&app.handle(), "browser");
+                update_navigate_checks(app.handle(), "browser");
                 let app_handle = app.handle().clone();
                 app.handle().listen("stack://active-page-changed", move |event| {
                     let trimmed = event.payload().trim_matches('"');

@@ -6,6 +6,7 @@ import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { drawWaveform } from './waveformRender';
 import { buildWaveformMenu } from './waveformMenu';
 import { useThemeColors } from '../../hooks/useThemeColors';
+import { ACCENT_WAVE_COLOR } from '../../stores/editorStore';
 
 interface Props {
   samples: Float32Array | null;
@@ -80,10 +81,12 @@ export function EditorWaveform({ samples, peaks, height, bpm = null, beatsPerBar
     ctx.scale(dpr, dpr);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
+    // The 'accent' swatch follows the live theme accent; everything else is a fixed hex.
+    const effectiveColor = waveColor === ACCENT_WAVE_COLOR ? themeColors.accent : waveColor;
     drawWaveform({
       ctx, w: size.w, h: size.h, samples, peaks, duration,
       windowStart, windowEnd, currentTime, loopOn, loopStart, loopEnd, cues,
-      color: waveColor, style: waveStyle,
+      color: effectiveColor, style: waveStyle,
       bpm, beatsPerBar, showBeatGrid,
       theme: themeColors,
       gain: volume,

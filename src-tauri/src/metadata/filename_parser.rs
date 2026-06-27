@@ -729,7 +729,7 @@ pub fn parse(filename: &str) -> FilenameMetadata {
 
     // Split on common delimiters for token matching (including parentheses, brackets, braces)
     let tokens: Vec<&str> = lower
-        .split(|c: char| c == '_' || c == '-' || c == ' ' || c == '.' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}')
+        .split(['_', '-', ' ', '.', '(', ')', '[', ']', '{', '}'])
         .filter(|t| !t.is_empty())
         .collect();
 

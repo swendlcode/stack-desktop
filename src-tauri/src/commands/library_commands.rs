@@ -342,12 +342,10 @@ pub async fn get_folder_info(path: String, state: State<'_, AppState>) -> Result
         tokio::task::spawn_blocking(move || {
             let mut size: u64 = 0;
             let mut count: u64 = 0;
-            for entry in walkdir::WalkDir::new(&root).follow_links(false) {
-                if let Ok(e) = entry {
-                    if e.file_type().is_file() {
-                        size += e.metadata().map(|m| m.len()).unwrap_or(0);
-                        count += 1;
-                    }
+            for e in walkdir::WalkDir::new(&root).follow_links(false).into_iter().flatten() {
+                if e.file_type().is_file() {
+                    size += e.metadata().map(|m| m.len()).unwrap_or(0);
+                    count += 1;
                 }
             }
             (size, count)
@@ -517,7 +515,7 @@ fn compute_project_info(root: PathBuf) -> Result<ProjectInfo> {
             size_bytes: size,
         })
         .collect();
-    subfolders.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    subfolders.sort_by_key(|s| std::cmp::Reverse(s.size_bytes));
     info.subfolders = subfolders;
 
     Ok(info)

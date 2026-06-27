@@ -1,6 +1,6 @@
 [package]
 name = "stack"
-version = "1.0.3"
+version = "1.0.7"
 description = "Local sample library manager"
 authors = ["Stack"]
 edition = "2021"
@@ -54,3 +54,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 parking_lot = "0.12"
 
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "json"] }
+
+# Embedded localhost HTTP server for browser access (same UI, no Tauri webview).
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs"] }
+tokio-stream = { version = "0.1", features = ["sync"] }

@@ -19,6 +19,8 @@ export interface Settings {
   pageSize: number;
   // Appearance
   theme: 'dark' | 'light';
+  /** Accent color as hex ("#F2613F"). null/undefined = base default. */
+  accentColor?: string | null;
   showWaveform: boolean;
   showBpmBadge: boolean;
   showKeyBadge: boolean;

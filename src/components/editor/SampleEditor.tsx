@@ -87,6 +87,15 @@ export function SampleEditor() {
 
     const unsub = editorEngine.subscribe(() => {
       const state = usePlayerStore.getState();
+      // While the editor owns playback, the main audioEngine is stopped and no
+      // longer drives the shared player store's currentTime. Mirror the editor
+      // engine's time/duration into the store so the list row's WaveformViewer
+      // (which reads progress = currentTime / duration from the store) scrubs in
+      // sync with the editor instead of freezing.
+      if (state.currentAsset?.id === asset.id) {
+        if (editorEngine.duration > 0) state.setDuration(editorEngine.duration);
+        state.setCurrentTime(editorEngine.currentTime);
+      }
       if (
         !editorEngine.playing &&
         state.isPlaying &&

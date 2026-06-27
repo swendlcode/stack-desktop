@@ -145,7 +145,8 @@ export function useWaveformCanvas(
     });
     themeObs.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-theme'],
+      // 'style' covers inline accent overrides written by applyTheme().
+      attributeFilter: ['data-theme', 'style'],
     });
 
     return () => {

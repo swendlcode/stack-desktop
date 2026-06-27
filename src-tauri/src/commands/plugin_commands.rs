@@ -30,7 +30,7 @@ pub fn scan_plugins(formats: Vec<String>, extra_paths: Vec<String>) -> Result<Ve
         scan_root(&root, "custom", "custom", &mut out, &mut seen)?;
     }
 
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 

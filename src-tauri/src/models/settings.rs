@@ -10,6 +10,7 @@ pub struct Settings {
     // ── Playback ──────────────────────────────────────────────────────────
     pub default_volume: f32,
     /// Auto-play next track when current one ends
+    #[serde(default)]
     pub auto_play_next: bool,
 
     // ── Library ───────────────────────────────────────────────────────────
@@ -22,6 +23,9 @@ pub struct Settings {
 
     // ── Appearance ────────────────────────────────────────────────────────
     pub theme: String,
+    /// Accent color as hex ("#F2613F"). None = base default.
+    #[serde(default)]
+    pub accent_color: Option<String>,
     /// Show waveform in the player bar
     pub show_waveform: bool,
     /// Show BPM badge on asset rows
@@ -57,6 +61,7 @@ impl Default for Settings {
             watch_for_changes: true,
             page_size: 100,
             theme: "dark".into(),
+            accent_color: None,
             show_waveform: true,
             show_bpm_badge: true,
             show_key_badge: true,

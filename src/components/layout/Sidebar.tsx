@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { ScrollArea } from '../ui/ScrollArea';
 import { LibraryTree } from '../library/LibraryTree';
 import { useUiStore, MIN_WIDTH, type ActivePage } from '../../stores/uiStore';
@@ -13,11 +12,7 @@ import {
   MusicSquare,
   MusicFilter,
 } from '../ui/icons';
-import { settingsService } from '../../services/settingsService';
-import logoSvg from '../../assets/logo/logo.svg';
-import logoDarkSvg from '../../assets/logo/logo-dark.svg';
-import iconSvg from '../../assets/logo/icon.svg';
-import type { Settings } from '../../types';
+import { LogoIcon, LogoWordmark } from '../ui/Logo';
 
 const NAV_ITEMS: Array<{ id: ActivePage; label: string; icon: typeof Element3 }> = [
   { id: 'browser',   label: 'Browser',   icon: Element3    },
@@ -30,12 +25,6 @@ const NAV_ITEMS: Array<{ id: ActivePage; label: string; icon: typeof Element3 }>
 ];
 
 export function Sidebar() {
-  const { data: settings } = useQuery<Settings>({
-    queryKey: ['settings'],
-    queryFn: () => settingsService.getSettings(),
-  });
-  const logo = settings?.theme === 'light' ? logoDarkSvg : logoSvg;
-
   const activePage = useUiStore((s) => s.activePage);
   const showPluginsNav = useUiStore((s) => s.showPluginsNav);
   const showProjectsNav = useUiStore((s) => s.showProjectsNav);
@@ -104,13 +93,7 @@ export function Sidebar() {
       <aside className="relative flex w-12 shrink-0 flex-col items-center border-r border-gray-700 bg-gray-900 py-2 gap-1">
         {/* Logo icon only */}
         <div className="flex h-8 w-8 items-center justify-center">
-          <img
-            src={iconSvg}
-            alt="Stack"
-            className="w-auto select-none"
-            style={{ height: '18px' }}
-            draggable={false}
-          />
+          <LogoIcon height={18} className="w-auto select-none" />
         </div>
 
         <div className="my-1 w-6 border-t border-gray-700" />
@@ -166,13 +149,7 @@ export function Sidebar() {
     >
       {/* Header row: logo only */}
       <div className="flex items-center px-4 pb-1 pt-3">
-        <img
-          src={logo}
-          alt="Stack"
-          className="w-auto select-none"
-          style={{ height: '20px' }}
-          draggable={false}
-        />
+        <LogoWordmark height={20} className="w-auto select-none" />
       </div>
 
       {/* Nav */}

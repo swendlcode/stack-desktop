@@ -410,13 +410,12 @@ fn parse_flp_events(bytes: &[u8]) -> Option<FlpScan> {
                     scan.time_signature = Some(format!("{}/{}", num, d));
                 }
             }
-            flp_event::TEMPO_COARSE_BYTE => {
-                if scan.tempo.is_none() {
+            flp_event::TEMPO_COARSE_BYTE
+                if scan.tempo.is_none() => {
                     if let Some(&b) = payload.first() {
                         scan.tempo = Some(b as f32);
                     }
                 }
-            }
             // Word events
             flp_event::NEW_CHANNEL => {
                 // Authoritative channel-creation marker. Counting these gives an
@@ -455,17 +454,16 @@ fn parse_flp_events(bytes: &[u8]) -> Option<FlpScan> {
                 }
             }
             // Text events
-            flp_event::PROJECT_TITLE => {
-                if scan.title.is_none() {
+            flp_event::PROJECT_TITLE
+                if scan.title.is_none() => {
                     if let Some(s) = decode_utf16le_text(payload) {
                         if !s.is_empty() {
                             scan.title = Some(s);
                         }
                     }
                 }
-            }
-            flp_event::COMMENT | flp_event::COMMENT_RTF => {
-                if scan.comments.is_none() {
+            flp_event::COMMENT | flp_event::COMMENT_RTF
+                if scan.comments.is_none() => {
                     if let Some(s) = decode_utf16le_text(payload) {
                         // RTF strings start with `{\rtf` — strip control words so we
                         // surface plain text. Crude but enough for a sidebar.
@@ -479,12 +477,10 @@ fn parse_flp_events(bytes: &[u8]) -> Option<FlpScan> {
                         }
                     }
                 }
-            }
-            flp_event::URL => {
-                if scan.url.is_none() {
+            flp_event::URL
+                if scan.url.is_none() => {
                     scan.url = decode_utf16le_text(payload);
                 }
-            }
             flp_event::VERSION => {
                 // TextVersion is UTF-8, unlike every other text event. The first
                 // dotted segment is the major version, which the playlist parser
@@ -501,16 +497,14 @@ fn parse_flp_events(bytes: &[u8]) -> Option<FlpScan> {
                     }
                 }
             }
-            flp_event::GENRE => {
-                if scan.genre.is_none() {
+            flp_event::GENRE
+                if scan.genre.is_none() => {
                     scan.genre = decode_utf16le_text(payload);
                 }
-            }
-            flp_event::AUTHOR => {
-                if scan.author.is_none() {
+            flp_event::AUTHOR
+                if scan.author.is_none() => {
                     scan.author = decode_utf16le_text(payload);
                 }
-            }
             flp_event::SAMPLE_FILE_NAME => {
                 if let Some(s) = decode_utf16le_text(payload) {
                     let trimmed = s.trim();
@@ -697,7 +691,7 @@ fn detect_track_origin(payload: &[u8]) -> Option<i32> {
     let median = samples[samples.len() / 2];
     let v20 = 501 - median;
     let old = 198 - median;
-    let pick = |o: i32| -> bool { o >= 0 && o <= 500 };
+    let pick = |o: i32| -> bool { (0..=500).contains(&o) };
     match (pick(v20), pick(old)) {
         (true, true) => Some(if v20.abs() <= old.abs() { 501 } else { 198 }),
         (true, false) => Some(501),
@@ -749,7 +743,7 @@ fn parse_playlist_items(
             Some(v) => v,
             None => continue,
         };
-        if track_signed < 0 || track_signed > 500 {
+        if !(0..=500).contains(&track_signed) {
             continue;
         }
 

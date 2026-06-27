@@ -1,5 +1,6 @@
 export {
   Music,
+  Global,
   FolderOpen,
   Folder,
   FolderAdd,

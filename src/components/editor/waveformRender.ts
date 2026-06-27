@@ -12,6 +12,8 @@ export interface ThemeColors {
   cue: string;
   /** Playhead color. */
   playhead: string;
+  /** Live theme accent as hex — default waveform color (the 'accent' swatch). */
+  accent: string;
 }
 
 export interface RenderParams {
@@ -161,9 +163,10 @@ function drawSignal(p: RenderParams, mid: number) {
   const baseHalfH    = h / 2 - 2;
   const halfH        = Math.min(baseHalfH * 1.5, baseHalfH * gainScale);
 
-  // Clip indicator: draw a subtle red tint at the top/bottom when gain > 1
+  // Clip indicator: draw a subtle tint at the top/bottom when gain > 1.
+  // Uses the active waveform color so it tracks the theme accent.
   if (gainScale > 1 && samples) {
-    ctx.fillStyle = hexToRgba('#F2613F', Math.min(0.35, (gainScale - 1) * 0.25));
+    ctx.fillStyle = hexToRgba(color, Math.min(0.35, (gainScale - 1) * 0.25));
     ctx.fillRect(0, 0, w, 4);
     ctx.fillRect(0, h - 4, w, 4);
   }

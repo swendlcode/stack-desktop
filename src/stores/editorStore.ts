@@ -8,8 +8,16 @@ export interface Cue {
 
 export type WaveStyle = 'filled' | 'line';
 
+/**
+ * Editor waveform color choices. The 'accent' sentinel follows the live app
+ * accent (resolved at draw time from the theme) so the editor matches whatever
+ * theme the user picked; the rest are fixed hexes for those who want a specific
+ * color regardless of theme.
+ */
+export const ACCENT_WAVE_COLOR = 'accent';
+
 export const WAVE_COLORS = [
-  { name: 'Fire',   hex: '#F2613F' },
+  { name: 'Accent', hex: ACCENT_WAVE_COLOR },
   { name: 'Amber',  hex: '#F5B841' },
   { name: 'Mint',   hex: '#5FD4A0' },
   { name: 'Cyan',   hex: '#4FC3F7' },
@@ -43,12 +51,18 @@ const COLOR_KEY = 'stack:editor:waveColor';
 const STYLE_KEY = 'stack:editor:waveStyle';
 const GRID_KEY = 'stack:editor:showBeatGrid';
 
+// The legacy "Fire" default (#F2613F) predates the theme-following 'accent'
+// swatch. Migrate it so existing users' editor waveform tracks their chosen
+// accent instead of staying frozen on the old orange.
+const LEGACY_FIRE = '#f2613f';
+
 function loadColor(): string {
   try {
     const v = localStorage.getItem(COLOR_KEY);
-    if (v && /^#[0-9a-f]{3,8}$/i.test(v)) return v;
+    if (v && v.toLowerCase() === LEGACY_FIRE) return ACCENT_WAVE_COLOR;
+    if (v === ACCENT_WAVE_COLOR || (v && /^#[0-9a-f]{3,8}$/i.test(v))) return v;
   } catch { /* noop */ }
-  return WAVE_COLORS[0].hex;
+  return ACCENT_WAVE_COLOR;
 }
 function loadStyle(): WaveStyle {
   try {

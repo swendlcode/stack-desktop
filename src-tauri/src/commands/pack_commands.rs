@@ -157,14 +157,14 @@ fn find_cover_in_dir(dir: &Path) -> Option<PathBuf> {
             Some(s) => s.to_lowercase(),
             None => continue,
         };
-        if !COVER_STEMS.iter().any(|s| *s == stem.as_str()) {
+        if !COVER_STEMS.contains(&stem.as_str()) {
             continue;
         }
         let ext = match path.extension().and_then(|e| e.to_str()) {
             Some(e) => e.to_lowercase(),
             None => continue,
         };
-        if ARTWORK_EXTS.iter().any(|e| *e == ext.as_str()) {
+        if ARTWORK_EXTS.contains(&ext.as_str()) {
             return Some(path);
         }
     }
@@ -236,6 +236,7 @@ pub async fn set_pack_artwork(
 /// Skips:
 ///   - the root itself (already written above)
 ///   - any directory whose name starts with '.' (hidden / .stack)
+///
 /// On macOS each descendant also gets the Finder icon applied.
 fn propagate_cover_to_descendants(
     root: &Path,
@@ -362,15 +363,13 @@ function run(argv) {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             format!("osascript failed: {}", stderr.trim()),
         ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if stdout != "ok" {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             format!("osascript reported: {}", stdout),
         ));
     }
