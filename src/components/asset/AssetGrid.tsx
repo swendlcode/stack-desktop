@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState, type RefObject } from 'react';
+import { useRef, useEffect, useCallback, useMemo, useState, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useQuery } from '@tanstack/react-query';
 import type { Asset, Settings } from '../../types';
@@ -74,6 +74,14 @@ export function AssetGrid({
   const { selectedIds, toggleId, selectRange, clearSelection } = useSelectionStore();
   // Track the last index clicked without modifier for Shift+click range anchor
   const lastClickedIndexRef = useRef<number | null>(null);
+
+  // Only materialized when there's an active multi-selection — lets a
+  // dragged row that's part of it carry the whole selection instead of
+  // just itself (see AssetRow's onDragStart).
+  const multiSelectedAssets = useMemo(
+    () => (selectedIds.size > 1 ? assets.filter((a) => selectedIds.has(a.id)) : null),
+    [assets, selectedIds],
+  );
 
   // Sync scroll position with editor height changes so it "pushes" content up
   useEffect(() => {
@@ -355,6 +363,7 @@ export function AssetGrid({
                   asset={asset}
                   isSelected={selectedIndex === virtualRow.index}
                   isMultiSelected={selectedIds.has(asset.id)}
+                  dragSelection={selectedIds.has(asset.id) ? multiSelectedAssets : null}
                   isLast={virtualRow.index === assets.length - 1}
                   viewType={viewType}
                   onOpenDetail={onOpenDetail}

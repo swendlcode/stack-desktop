@@ -1,5 +1,5 @@
-// Pack color palette — only uses the 3 brand colors + neutral grays
-const PALETTE = [
+// Shared color palette — only uses the 3 brand colors + neutral grays
+export const PALETTE = [
   '#F2613F', // fire
   '#888888', // gray-400
   '#555555', // gray-500
@@ -11,6 +11,9 @@ const PALETTE = [
   '#444444',
   '#999999',
 ];
+
+/** Shown for folders/stacks with no color chosen yet — neutral, not the accent. */
+export const DEFAULT_FOLDER_COLOR = PALETTE[1];
 
 export function packColorFor(seed: string): string {
   let hash = 0;

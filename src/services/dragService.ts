@@ -22,7 +22,9 @@ export const dragService = {
    * Starts a native OS drag-out with the given file paths. The drop target
    * (Finder, FL Studio, Ableton, any DAW) receives real file references, so
    * the DAW imports the sample / MIDI / preset as if the user dragged from
-   * Finder.
+   * Finder. Dropping back onto our own window (e.g. a Favorites folder card)
+   * is caught separately by Tauri's window-level `onDragDropEvent` — see
+   * FavoritesFolderStrip — not by anything here.
    */
   async startFileDrag(paths: string[], opts?: { packRoot?: string | null }): Promise<void> {
     if (paths.length === 0) return;

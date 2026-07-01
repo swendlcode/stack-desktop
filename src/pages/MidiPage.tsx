@@ -48,6 +48,7 @@ export function MidiPage() {
 
   const assets = data?.assets ?? [];
   const total = data?.total ?? 0;
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -59,7 +60,7 @@ export function MidiPage() {
         showBpmFilter
         searchPlaceholder="Search MIDI files, packs, instruments…"
       />
-      <div className="min-h-0 flex-1">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         {isLoading && assets.length === 0 ? (
           <div className="flex h-full items-center justify-center text-gray-500">
             Loading...
@@ -76,6 +77,7 @@ export function MidiPage() {
             totalCount={total}
             onPageChange={setPage}
             viewType="midi"
+            scrollContainerRef={scrollRef}
           />
         )}
       </div>

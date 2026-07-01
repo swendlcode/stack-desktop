@@ -67,6 +67,8 @@ interface UiStore {
   sidebarWidth: number;
   activePage: ActivePage;
   activePackId: string | null;
+  /** Which favorites folder (stack) is selected, or null for All Favorites. */
+  favoriteStackId: string | null;
   browserViewMode: BrowserViewMode;
   detailAssetId: string | null;
   editorAssetId: string | null;
@@ -74,6 +76,7 @@ interface UiStore {
   showPluginsNav: boolean;
   showProjectsNav: boolean;
   setActivePage: (page: ActivePage, packId?: string) => void;
+  setFavoriteStackId: (id: string | null) => void;
   setBrowserViewMode: (mode: BrowserViewMode) => void;
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
@@ -93,6 +96,7 @@ export const useUiStore = create<UiStore>((set) => ({
   sidebarWidth: loadWidth(),
   activePage: 'browser',
   activePackId: null,
+  favoriteStackId: null,
   browserViewMode: 'pack',
   detailAssetId: null,
   editorAssetId: null,
@@ -101,6 +105,7 @@ export const useUiStore = create<UiStore>((set) => ({
   showProjectsNav: loadNavVisibility(SHOW_PROJECTS_NAV_KEY, false),
   setActivePage: (activePage, packId) =>
     set({ activePage, activePackId: packId ?? null }),
+  setFavoriteStackId: (favoriteStackId) => set({ favoriteStackId }),
   setBrowserViewMode: (browserViewMode) => set({ browserViewMode }),
   toggleSidebar: () =>
     set((s) => {

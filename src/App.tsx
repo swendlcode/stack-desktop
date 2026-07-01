@@ -22,6 +22,7 @@ const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((m) => ({ de
 const PluginsPage = lazy(() => import('./pages/PluginsPage').then((m) => ({ default: m.PluginsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
+import { WhatsNewModal } from './components/WhatsNewModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useUiStore } from './stores/uiStore';
 import { useFilterStore } from './stores/filterStore';
@@ -29,6 +30,8 @@ import { useSelectionStore } from './stores/selectionStore';
 import { useLibrarySync } from './hooks/useLibrarySync';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useTheme } from './hooks/useTheme';
+import { useStackDropListener } from './hooks/useStackDropListener';
+import { useWhatsNew } from './hooks/useWhatsNew';
 import { libraryService } from './services/libraryService';
 import { settingsService } from './services/settingsService';
 import { usePlayerStore } from './stores/playerStore';
@@ -70,6 +73,8 @@ export default function App() {
   useLibrarySync();
   useKeyboard();
   useTheme();
+  useStackDropListener();
+  const { whatsNew, dismiss: dismissWhatsNew } = useWhatsNew();
 
   useEffect(() => {
     try {
@@ -229,6 +234,13 @@ export default function App() {
         onNavigateProjects={() => setActivePage('projects')}
         onNavigateBrowser={() => setActivePage('browser')}
       />
+      {whatsNew && !onboardingOpen && (
+        <WhatsNewModal
+          version={whatsNew.version}
+          notes={whatsNew.notes}
+          onClose={dismissWhatsNew}
+        />
+      )}
     </div>
   );
 }

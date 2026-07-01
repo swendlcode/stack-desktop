@@ -1,6 +1,6 @@
 [package]
 name = "stack"
-version = "1.0.7"
+version = "1.0.8"
 description = "Local sample library manager"
 authors = ["Stack"]
 edition = "2021"

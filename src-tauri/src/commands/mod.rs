@@ -6,5 +6,6 @@ pub mod player_commands;
 pub mod plugin_commands;
 pub mod project_commands;
 pub mod settings_commands;
+pub mod stack_commands;
 pub mod update_commands;
 pub mod url_image_commands;

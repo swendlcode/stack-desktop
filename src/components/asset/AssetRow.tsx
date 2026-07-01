@@ -36,6 +36,7 @@ import { ContextMenu, type ContextMenuItem } from "../ui/ContextMenu";
 import { useFilterStore } from "../../stores/filterStore";
 import { useUiStore } from "../../stores/uiStore";
 import { useSelectionStore } from "../../stores/selectionStore";
+import { useStackDropZoneStore } from "../../stores/stackDropZoneStore";
 import { audioEngine } from "../../services/audioEngine";
 import type { MidiMeta, ProjectMeta } from "../../types";
 
@@ -45,6 +46,8 @@ interface AssetRowProps {
   asset: Asset;
   isSelected?: boolean;
   isMultiSelected?: boolean;
+  /** When this row is part of an active multi-selection, the full selected set — dragged together. */
+  dragSelection?: Asset[] | null;
   isLast?: boolean;
   viewType?: ViewType;
   onPreview?: (asset: Asset) => void;
@@ -59,6 +62,7 @@ export const AssetRow = memo(function AssetRow({
   asset,
   isSelected = false,
   isMultiSelected = false,
+  dragSelection = null,
   isLast = false,
   viewType = "sample",
   onPreview,
@@ -321,9 +325,22 @@ export const AssetRow = memo(function AssetRow({
       draggable
       onDragStart={(e) => {
         e.preventDefault();
-        dragService.startFileDrag([asset.path], { packRoot }).catch((err) => {
-          console.error("drag-out failed", err);
-        });
+        // If this row is part of an active multi-selection, drag the whole
+        // selection together instead of just the row under the cursor.
+        // Recorded so a drop onto a Favorites folder card (caught via
+        // Tauri's window-level onDragDropEvent, not this callback) knows
+        // which assets to add.
+        const dragAssets = dragSelection && dragSelection.length > 0 ? dragSelection : [asset];
+        // NOTE: startFileDrag resolves the instant the OS drag *starts*, not
+        // when it ends, so we must NOT clear draggingAssets here — the drop
+        // (and its clearing) is handled by FavoritesFolderStrip's
+        // onDragDropEvent listener, which fires when the drag actually lands.
+        useStackDropZoneStore.getState().setDraggingAssets(dragAssets);
+        dragService
+          .startFileDrag(dragAssets.map((a) => a.path), { packRoot })
+          .catch((err) => {
+            console.error("drag-out failed", err);
+          });
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

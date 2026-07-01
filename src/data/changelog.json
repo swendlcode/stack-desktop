@@ -1,0 +1,35 @@
+{
+  "1.0.8": {
+    "date": "2026-07-01",
+    "title": "Favorites folders & drag-to-organize",
+    "summary": "Organize your favorites into colorful folders and file samples away with a single drag.",
+    "highlights": [
+      "New Favorites folders — create, rename, and color them right from the Favorites page.",
+      "Drag any sample, MIDI, or preset onto a folder (from Browser, MIDI, Presets, or Favorites) to file it away — it's favorited automatically.",
+      "Drag multiple selected samples into a folder at once.",
+      "Favorites is now expandable in the sidebar, with a live file count on every folder.",
+      "Give each folder its own color — pick from the palette or choose any custom color.",
+      "Fixed scrolling on the Favorites, MIDI, and Presets pages."
+    ]
+  },
+  "1.0.7": {
+    "date": "2026-06-26",
+    "title": "Custom themes & window controls",
+    "summary": "Make Stack yours with custom accent themes and refined window controls.",
+    "highlights": [
+      "Custom themes — set your own accent color across the whole app.",
+      "Open samples in your browser for a quick listen.",
+      "Custom window controls for a cleaner, more native feel."
+    ]
+  },
+  "1.0.6": {
+    "date": "2026-06-12",
+    "title": "Auto-play & sticky toolbar",
+    "summary": "Smoother browsing with continuous playback and a toolbar that stays put.",
+    "highlights": [
+      "Auto-play the next sample as you browse.",
+      "Sticky toolbar keeps search and filters in reach while you scroll.",
+      "Polished cover editing for packs and folders."
+    ]
+  }
+}

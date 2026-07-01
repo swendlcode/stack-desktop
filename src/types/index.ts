@@ -4,3 +4,4 @@ export * from './filters';
 export * from './player';
 export * from './ipc';
 export * from './plugins';
+export * from './stack';

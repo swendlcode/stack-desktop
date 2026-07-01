@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollArea } from '../ui/ScrollArea';
 import { LibraryTree } from '../library/LibraryTree';
+import { SidebarFolderRow } from './SidebarFolderRow';
 import { useUiStore, MIN_WIDTH, type ActivePage } from '../../stores/uiStore';
 import { useFilterStore } from '../../stores/filterStore';
+import { useStacks } from '../../hooks/useStacks';
 import {
   Element3,
   Folder,
@@ -11,6 +13,8 @@ import {
   Cpu,
   MusicSquare,
   MusicFilter,
+  ArrowDown2,
+  ArrowRight2,
 } from '../ui/icons';
 import { LogoIcon, LogoWordmark } from '../ui/Logo';
 
@@ -33,7 +37,11 @@ export function Sidebar() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
   const setActivePage = useUiStore((s) => s.setActivePage);
+  const favoriteStackId = useUiStore((s) => s.favoriteStackId);
+  const setFavoriteStackId = useUiStore((s) => s.setFavoriteStackId);
   const setPathPrefix = useFilterStore((s) => s.setPathPrefix);
+  const { data: stacks = [] } = useStacks();
+  const [favoritesExpanded, setFavoritesExpanded] = useState(true);
   const navItems = NAV_ITEMS.filter((item) => {
     if (item.id === 'plugins' && !showPluginsNav) return false;
     if (item.id === 'projects' && !showProjectsNav) return false;
@@ -157,28 +165,69 @@ export function Sidebar() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = activePage === item.id;
+          const isFavorites = item.id === 'favorites';
+          const hasFolders = isFavorites && stacks.length > 0;
+          // Favorites row is only "active" (accent) when showing All Favorites;
+          // a selected folder highlights its own child row instead.
+          const rowActive = isFavorites ? active && favoriteStackId === null : active;
+
           return (
-            <button
-              key={item.id}
-              onClick={() => {
-                // Clicking Browser or Projects always exits any drilled-in
-                // view: Browser clears the path prefix; Projects also clears
-                // it so users can re-click "Projects" while inside a project
-                // to bounce back to the projects grid.
-                if (item.id === 'browser' || item.id === 'projects') {
-                  setPathPrefix(null);
-                }
-                setActivePage(item.id);
-              }}
-              className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
-                active
-                  ? 'bg-stack-fire/10 text-stack-fire'
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-stack-white'
-              }`}
-            >
-              <Icon size={16} color="currentColor" variant={active ? 'Bulk' : 'Linear'} />
-              <span className="truncate">{item.label}</span>
-            </button>
+            <div key={item.id}>
+              <div
+                className={`group flex items-center rounded-md text-sm transition-colors ${
+                  rowActive
+                    ? 'bg-stack-fire/10 text-stack-fire'
+                    : 'text-gray-300 hover:bg-gray-800 hover:text-stack-white'
+                }`}
+              >
+                <button
+                  onClick={() => {
+                    // Clicking Browser or Projects always exits any drilled-in
+                    // view: Browser clears the path prefix; Projects also clears
+                    // it so users can re-click "Projects" while inside a project
+                    // to bounce back to the projects grid.
+                    if (item.id === 'browser' || item.id === 'projects') {
+                      setPathPrefix(null);
+                    }
+                    if (isFavorites) setFavoriteStackId(null);
+                    setActivePage(item.id);
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5"
+                >
+                  <Icon size={16} color="currentColor" variant={rowActive ? 'Bulk' : 'Linear'} />
+                  <span className="truncate">{item.label}</span>
+                </button>
+                {hasFolders && (
+                  <button
+                    onClick={() => setFavoritesExpanded((v) => !v)}
+                    className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-700/60 hover:text-stack-white"
+                    aria-label={favoritesExpanded ? 'Collapse favorites' : 'Expand favorites'}
+                  >
+                    {favoritesExpanded ? (
+                      <ArrowDown2 size={13} color="currentColor" variant="Linear" />
+                    ) : (
+                      <ArrowRight2 size={13} color="currentColor" variant="Linear" />
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {isFavorites && hasFolders && favoritesExpanded && (
+                <div className="mb-0.5 mt-0.5 flex flex-col gap-0.5">
+                  {stacks.map((stack) => (
+                    <SidebarFolderRow
+                      key={stack.id}
+                      stack={stack}
+                      isActive={active && favoriteStackId === stack.id}
+                      onSelect={(id) => {
+                        setFavoriteStackId(id);
+                        setActivePage('favorites');
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           );
         })}
       </nav>

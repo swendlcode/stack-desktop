@@ -42,6 +42,27 @@ jobs:
           jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
           sed -i.bak "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
 
+      - name: Build release notes from changelog
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          {
+            echo 'body<<CHANGELOG_EOF'
+            jq -r --arg v "$VERSION" '
+              .[$v] as $r
+              | if $r == null
+                then "Release " + $v
+                else "### " + $r.title + "\n\n" + $r.summary + "\n\n"
+                     + ($r.highlights | map("- " + .) | join("\n"))
+                end
+            ' src/data/changelog.json
+            echo ''
+            echo '—'
+            echo 'Visit [stack.swendl.com](https://stack.swendl.com) for more information.'
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Install frontend dependencies
         run: npm install
 
@@ -52,7 +73,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Stack ${{ github.ref_name }}
-          releaseBody: |
-            Visit [stack.swendl.com](https://stack.swendl.com) for more information.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false

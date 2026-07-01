@@ -654,6 +654,24 @@ impl AssetRepository {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(assets)
     }
+
+    pub fn by_stack(&self, stack_id: &str, limit: i64, offset: i64) -> Result<Vec<Asset>> {
+        let conn = self.db.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.path, a.filename, a.extension, a.type, a.pack_id, a.pack_name, \
+             a.bpm, a.key_note, a.key_scale, a.duration_ms, a.sample_rate, a.channels, a.bit_depth, \
+             a.instrument, a.subtype, a.is_favorite, a.user_tags, a.play_count, a.last_played, a.rating, \
+             a.meta, a.index_status, a.bpm_source, a.key_source, NULL AS waveform_data, \
+             a.energy_level, a.texture, a.space, a.role, \
+             a.created_at, a.updated_at \
+             FROM assets a JOIN stack_assets sa ON sa.asset_id = a.id \
+             WHERE sa.stack_id = ?1 ORDER BY sa.position ASC LIMIT ?2 OFFSET ?3",
+        )?;
+        let assets = stmt
+            .query_map(params![stack_id, limit, offset], row_to_asset)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(assets)
+    }
 }
 
 fn row_to_asset(row: &Row) -> rusqlite::Result<Asset> {

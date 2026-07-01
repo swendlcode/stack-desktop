@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::core::{FileWatcher, Indexer, WatchEvent};
-use crate::db::{AssetRepository, DatabasePool, PackRepository};
+use crate::db::{AssetRepository, DatabasePool, PackRepository, StackRepository};
 use crate::error::Result;
 use crate::models::Settings;
 
@@ -13,6 +13,7 @@ pub struct AppState {
     pub db: Arc<DatabasePool>,
     pub asset_repo: Arc<AssetRepository>,
     pub pack_repo: Arc<PackRepository>,
+    pub stack_repo: Arc<StackRepository>,
     pub indexer: Arc<Indexer>,
     pub watcher: Arc<FileWatcher>,
     pub settings: Arc<RwLock<Settings>>,
@@ -41,6 +42,7 @@ impl AppState {
         let db = DatabasePool::open(&data_dir.join("stack.db"))?;
         let asset_repo = Arc::new(AssetRepository::new(db.clone()));
         let pack_repo = Arc::new(PackRepository::new(db.clone()));
+        let stack_repo = Arc::new(StackRepository::new(db.clone()));
 
         let settings = Arc::new(RwLock::new(settings));
         let concurrency = settings.read().indexer_concurrency;
@@ -126,6 +128,7 @@ impl AppState {
             db,
             asset_repo,
             pack_repo,
+            stack_repo,
             indexer,
             watcher,
             settings,
