@@ -21,7 +21,23 @@ pub struct MidiMetadata {
     pub piano_roll: Vec<MidiNote>,
 }
 
+/// Real MIDI files are a few KB; anything beyond this is malformed or
+/// mislabeled and would otherwise be buffered whole into memory.
+const MAX_MIDI_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Upper bound on notes kept for the piano-roll preview. A pathological file
+/// with hundreds of thousands of note-ons would otherwise bloat the asset's
+/// meta JSON and every IPC payload that carries it.
+const MAX_PIANO_ROLL_NOTES: usize = 10_000;
+
 pub fn parse(path: &Path) -> Result<MidiMetadata> {
+    let size = fs::metadata(path)?.len();
+    if size > MAX_MIDI_BYTES {
+        return Err(StackError::Other(format!(
+            "midi: file too large ({} bytes, cap {})",
+            size, MAX_MIDI_BYTES
+        )));
+    }
     let bytes = fs::read(path)?;
     let smf = Smf::parse(&bytes).map_err(|e| StackError::Other(format!("midi: {}", e)))?;
 
@@ -87,7 +103,6 @@ pub fn parse(path: &Path) -> Result<MidiMetadata> {
         }
     }
 
-    meta.note_count = piano_roll.len() as u32;
     if meta.note_range_low > meta.note_range_high {
         meta.note_range_low = 0;
     }
@@ -120,12 +135,17 @@ fn finish_note(
             if pitch > meta.note_range_high {
                 meta.note_range_high = pitch;
             }
-            roll.push(MidiNote {
-                pitch,
-                start_tick: start,
-                duration_ticks: duration,
-                velocity: vel,
-            });
+            // note_count reflects every real note; the stored roll is capped
+            // so a pathological file can't bloat the meta JSON.
+            meta.note_count = meta.note_count.saturating_add(1);
+            if roll.len() < MAX_PIANO_ROLL_NOTES {
+                roll.push(MidiNote {
+                    pitch,
+                    start_tick: start,
+                    duration_ticks: duration,
+                    velocity: vel,
+                });
+            }
         }
     }
 }

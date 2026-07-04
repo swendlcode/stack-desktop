@@ -22,6 +22,12 @@ use crate::models::{Asset, Pack, ScanProgress};
 /// 250 ms gives smooth progress bar updates without hammering the JS thread.
 const PROGRESS_THROTTLE_MS: u64 = 250;
 
+/// Upserts are buffered and committed in one transaction per batch. Per-file
+/// transactions were the write bottleneck at scale: 164k files = 164k WAL
+/// commits + FTS churn, enough lock pressure to keep the adaptive tuner
+/// pinned at minimum concurrency.
+const UPSERT_BATCH_SIZE: usize = 100;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum JobPriority {
     Low = 1,
@@ -64,6 +70,11 @@ pub struct Indexer {
     /// Buffered `touch_last_seen` IDs — flushed in batches instead of one
     /// UPDATE per file, which was causing thousands of individual write locks.
     pending_touches: Mutex<Vec<String>>,
+    /// Buffered parsed assets (+ content hash) awaiting a batched upsert.
+    pending_upserts: Mutex<Vec<(Asset, Option<String>)>>,
+    /// Full batches go to a single writer task — serializing upsert
+    /// transactions instead of racing concurrent flushes for the write lock.
+    upsert_tx: UnboundedSender<Vec<(Asset, Option<String>)>>,
 }
 
 impl Indexer {
@@ -75,6 +86,7 @@ impl Indexer {
         concurrency: usize,
     ) -> Arc<Self> {
         let (tx, mut rx) = unbounded_channel::<IndexJob>();
+        let (upsert_tx, mut upsert_rx) = unbounded_channel::<Vec<(Asset, Option<String>)>>();
         let sem = Arc::new(parking_lot::RwLock::new(
             Arc::new(Semaphore::new(concurrency.max(1)))
         ));
@@ -98,6 +110,46 @@ impl Indexer {
             max_concurrency,
             last_progress_ms: AtomicUsize::new(0),
             pending_touches: Mutex::new(Vec::new()),
+            pending_upserts: Mutex::new(Vec::new()),
+            upsert_tx,
+        });
+
+        // Dedicated writer: one batch transaction at a time, retried until it
+        // lands. Dropping a batch loses library entries, so the backoff is
+        // generous — with IMMEDIATE transactions + busy_timeout a batch only
+        // fails while another writer is mid-transaction for >10s.
+        let writer_repo = indexer.asset_repo.clone();
+        let writer_retries = indexer.lock_retries_window.clone();
+        tauri::async_runtime::spawn(async move {
+            while let Some(items) = upsert_rx.recv().await {
+                for attempt in 0..8u32 {
+                    let repo = writer_repo.clone();
+                    let batch = items.clone();
+                    match tokio::task::spawn_blocking(move || repo.upsert_batch(&batch)).await {
+                        Ok(Ok(())) => break,
+                        Ok(Err(e)) => {
+                            let locked =
+                                e.to_string().to_lowercase().contains("database is locked");
+                            if locked && attempt < 7 {
+                                writer_retries.fetch_add(1, Ordering::Relaxed);
+                                sleep(Duration::from_millis(250 * (attempt as u64 + 1))).await;
+                                continue;
+                            }
+                            tracing::error!(
+                                "dropping upsert batch ({} assets) after {} attempts: {}",
+                                items.len(),
+                                attempt + 1,
+                                e
+                            );
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::error!("upsert writer task join error: {}", e);
+                            break;
+                        }
+                    }
+                }
+            }
         });
 
         let worker = indexer.clone();
@@ -211,6 +263,8 @@ impl Indexer {
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
+        // Parsed-but-unwritten assets are still valid work — persist them.
+        self.flush_upserts();
         let mut c = self.counters.lock();
         // Mark all queued as "done" so progress shows complete
         c.indexed += c.queued;
@@ -234,10 +288,11 @@ impl Indexer {
         drop(c);
 
         // When the last job finishes:
-        // 1. Flush any remaining buffered touch_last_seen IDs.
+        // 1. Flush any remaining buffered upserts + touch_last_seen IDs.
         // 2. Recount all pack asset_counts in one pass.
         // 3. Force a final progress emit so the UI shows 100%.
         if finished {
+            self.flush_upserts();
             self.flush_touches();
             let pack_repo = self.pack_repo.clone();
             tauri::async_runtime::spawn(async move {
@@ -310,6 +365,34 @@ impl Indexer {
         });
     }
 
+    /// Buffer a parsed asset for the next batched upsert. Flushes when the
+    /// buffer reaches UPSERT_BATCH_SIZE; the scan-end hook flushes the rest.
+    fn queue_upsert(&self, asset: Asset, content_hash: Option<String>) {
+        let batch: Option<Vec<(Asset, Option<String>)>> = {
+            let mut buf = self.pending_upserts.lock();
+            buf.push((asset, content_hash));
+            if buf.len() >= UPSERT_BATCH_SIZE {
+                Some(std::mem::take(&mut *buf))
+            } else {
+                None
+            }
+        };
+        if let Some(items) = batch {
+            let _ = self.upsert_tx.send(items);
+        }
+    }
+
+    /// Flush any buffered upserts (called at scan end and on cancel).
+    fn flush_upserts(&self) {
+        let items: Vec<(Asset, Option<String>)> = {
+            let mut buf = self.pending_upserts.lock();
+            std::mem::take(&mut *buf)
+        };
+        if !items.is_empty() {
+            let _ = self.upsert_tx.send(items);
+        }
+    }
+
     async fn process_with_retry(&self, job: IndexJob) -> Result<()> {
         const MAX_ATTEMPTS: usize = 5;
         for attempt in 0..MAX_ATTEMPTS {
@@ -352,7 +435,8 @@ impl Indexer {
         // and skip the expensive hash + metadata read. When the file IS newer
         // (e.g. user re-saved an FLP in FL Studio), fall through and re-parse
         // so the meta JSON — playlist clips, tempo, plugins — stays in sync.
-        if let Ok(Some((existing_id, updated_at))) = self.asset_repo.path_stamp(&path_str) {
+        let mut existing_id = None;
+        if let Ok(Some((row_id, updated_at))) = self.asset_repo.path_stamp(&path_str) {
             let mtime_secs = std::fs::metadata(&path)
                 .ok()
                 .and_then(|m| m.modified().ok())
@@ -362,18 +446,24 @@ impl Indexer {
             if mtime_secs <= updated_at {
                 // Buffer the touch — flushed in batches of 500 to avoid
                 // thousands of individual UPDATE statements during re-scans.
-                self.queue_touch(existing_id);
+                self.queue_touch(row_id);
                 return Ok(());
             }
+            existing_id = Some(row_id);
         }
 
-        // Hash for identity
-        let id = tokio::task::spawn_blocking({
+        // Identity is per PATH: keep the row's existing id when re-indexing,
+        // otherwise derive one from the path. Duplicate-content files at other
+        // paths keep their own rows; the content hash below is stored as a
+        // plain column for duplicate detection, never as the primary key.
+        let id = existing_id.unwrap_or_else(|| hasher::hash_path(&path_str));
+        let content_hash = tokio::task::spawn_blocking({
             let p = path.clone();
             move || hasher::hash_file(&p)
         })
         .await
-        .map_err(|e| crate::error::StackError::Other(e.to_string()))??;
+        .map_err(|e| crate::error::StackError::Other(e.to_string()))?
+        .ok();
 
         // Ensure pack
         let (pack_id, pack_name) = self.ensure_pack(&path, job.pack_root.as_deref())?;
@@ -513,12 +603,12 @@ impl Indexer {
             updated_at: now,
         };
 
-        self.asset_repo.upsert(&asset)?;
-
+        // Buffered — committed in batches of UPSERT_BATCH_SIZE by queue_upsert.
         // Don't recount per-file — pack counts are reconciled at scan end.
         // Don't emit the full asset payload per-file either — the UI refreshes
         // via the throttled scan-progress event and re-queries when scanning ends.
         // This eliminates thousands of IPC serialisation calls during large scans.
+        self.queue_upsert(asset, content_hash);
 
         Ok(())
     }

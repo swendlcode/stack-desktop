@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use rusqlite::{params, params_from_iter, Row};
+use rusqlite::{params, params_from_iter, types::Value, OptionalExtension, Row};
 
 use crate::db::{query_builder, DatabasePool};
 use crate::error::{Result, StackError};
@@ -141,85 +141,151 @@ impl AssetRepository {
         }
     }
 
-    pub fn upsert(&self, asset: &Asset) -> Result<()> {
+    pub fn upsert(&self, asset: &Asset, content_hash: Option<&str>) -> Result<()> {
+        let item = (asset.clone(), content_hash.map(String::from));
+        self.upsert_batch(std::slice::from_ref(&item))
+    }
+
+    /// Insert or update a batch of assets in ONE transaction. During bulk
+    /// indexing this replaces per-file transactions (164k commits for a large
+    /// library) with one commit per ~100 files, which is what keeps the
+    /// SQLite write lock breathable at multi-TB library scale.
+    ///
+    /// Conflict target is `path`, not `id`: each on-disk path owns exactly one
+    /// row, and byte-identical twins elsewhere keep their own rows. The row's
+    /// existing id is preserved on update so stack references stay valid.
+    /// The `id` clause only fires for a moved file re-using a path-hash id.
+    pub fn upsert_batch(&self, items: &[(Asset, Option<String>)]) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
         let mut conn = self.db.get()?;
-        let tags = serde_json::to_string(&asset.user_tags)?;
-        let meta = serde_json::to_string(&asset.meta)?;
-        let waveform = asset.waveform_data.as_ref().map(|v| waveform_to_base64(v));
-        let tx = conn.transaction()?;
+        // IMMEDIATE: take the write lock at BEGIN, where the busy_timeout
+        // handler applies. A deferred transaction can hit an un-retryable
+        // SQLITE_BUSY when upgrading to write mid-transaction under load.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        {
+            let mut upsert_stmt = tx.prepare_cached(
+                "INSERT INTO assets (id, path, filename, extension, type, pack_id, pack_name, \
+                 bpm, key_note, key_scale, duration_ms, sample_rate, channels, \
+                 instrument, subtype, is_favorite, user_tags, play_count, meta, \
+                 index_status, bpm_source, key_source, waveform_data, \
+                 energy_level, texture, space, role, content_hash, \
+                 created_at, updated_at, last_seen_at) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31) \
+                 ON CONFLICT(path) DO UPDATE SET \
+                    filename = excluded.filename, pack_id = excluded.pack_id, \
+                    pack_name = excluded.pack_name, bpm = COALESCE(excluded.bpm, assets.bpm), \
+                    key_note = COALESCE(excluded.key_note, assets.key_note), \
+                    key_scale = COALESCE(excluded.key_scale, assets.key_scale), \
+                    duration_ms = COALESCE(excluded.duration_ms, assets.duration_ms), \
+                    sample_rate = COALESCE(excluded.sample_rate, assets.sample_rate), \
+                    channels = COALESCE(excluded.channels, assets.channels), \
+                    instrument = COALESCE(excluded.instrument, assets.instrument), \
+                    subtype = COALESCE(excluded.subtype, assets.subtype), \
+                    meta = excluded.meta, index_status = excluded.index_status, \
+                    bpm_source = COALESCE(excluded.bpm_source, assets.bpm_source), \
+                    key_source = COALESCE(excluded.key_source, assets.key_source), \
+                    waveform_data = COALESCE(excluded.waveform_data, assets.waveform_data), \
+                    energy_level = COALESCE(excluded.energy_level, assets.energy_level), \
+                    texture = COALESCE(excluded.texture, assets.texture), \
+                    space = COALESCE(excluded.space, assets.space), \
+                    role = COALESCE(excluded.role, assets.role), \
+                    content_hash = COALESCE(excluded.content_hash, assets.content_hash), \
+                    updated_at = excluded.updated_at, last_seen_at = excluded.last_seen_at \
+                 ON CONFLICT(id) DO UPDATE SET \
+                    path = excluded.path, filename = excluded.filename, pack_id = excluded.pack_id, \
+                    pack_name = excluded.pack_name, bpm = COALESCE(excluded.bpm, assets.bpm), \
+                    key_note = COALESCE(excluded.key_note, assets.key_note), \
+                    key_scale = COALESCE(excluded.key_scale, assets.key_scale), \
+                    duration_ms = COALESCE(excluded.duration_ms, assets.duration_ms), \
+                    sample_rate = COALESCE(excluded.sample_rate, assets.sample_rate), \
+                    channels = COALESCE(excluded.channels, assets.channels), \
+                    instrument = COALESCE(excluded.instrument, assets.instrument), \
+                    subtype = COALESCE(excluded.subtype, assets.subtype), \
+                    meta = excluded.meta, index_status = excluded.index_status, \
+                    bpm_source = COALESCE(excluded.bpm_source, assets.bpm_source), \
+                    key_source = COALESCE(excluded.key_source, assets.key_source), \
+                    waveform_data = COALESCE(excluded.waveform_data, assets.waveform_data), \
+                    energy_level = COALESCE(excluded.energy_level, assets.energy_level), \
+                    texture = COALESCE(excluded.texture, assets.texture), \
+                    space = COALESCE(excluded.space, assets.space), \
+                    role = COALESCE(excluded.role, assets.role), \
+                    content_hash = COALESCE(excluded.content_hash, assets.content_hash), \
+                    updated_at = excluded.updated_at, last_seen_at = excluded.last_seen_at",
+            )?;
+            let mut row_id_stmt = tx.prepare_cached("SELECT id FROM assets WHERE path = ?1")?;
+            let mut fts_del_stmt = tx.prepare_cached("DELETE FROM assets_fts WHERE id = ?1")?;
+            let mut fts_ins_stmt = tx.prepare_cached(
+                "INSERT INTO assets_fts (id, filename, pack_name, instrument, user_tags) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
 
-        tx.execute(
-            "INSERT INTO assets (id, path, filename, extension, type, pack_id, pack_name, \
-             bpm, key_note, key_scale, duration_ms, sample_rate, channels, \
-             instrument, subtype, is_favorite, user_tags, play_count, meta, \
-             index_status, bpm_source, key_source, waveform_data, \
-             energy_level, texture, space, role, \
-             created_at, updated_at, last_seen_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30) \
-             ON CONFLICT(id) DO UPDATE SET \
-                path = excluded.path, filename = excluded.filename, pack_id = excluded.pack_id, \
-                pack_name = excluded.pack_name, bpm = COALESCE(excluded.bpm, assets.bpm), \
-                key_note = COALESCE(excluded.key_note, assets.key_note), \
-                key_scale = COALESCE(excluded.key_scale, assets.key_scale), \
-                duration_ms = COALESCE(excluded.duration_ms, assets.duration_ms), \
-                sample_rate = COALESCE(excluded.sample_rate, assets.sample_rate), \
-                channels = COALESCE(excluded.channels, assets.channels), \
-                instrument = COALESCE(excluded.instrument, assets.instrument), \
-                subtype = COALESCE(excluded.subtype, assets.subtype), \
-                meta = excluded.meta, index_status = excluded.index_status, \
-                bpm_source = COALESCE(excluded.bpm_source, assets.bpm_source), \
-                key_source = COALESCE(excluded.key_source, assets.key_source), \
-                waveform_data = COALESCE(excluded.waveform_data, assets.waveform_data), \
-                energy_level = COALESCE(excluded.energy_level, assets.energy_level), \
-                texture = COALESCE(excluded.texture, assets.texture), \
-                space = COALESCE(excluded.space, assets.space), \
-                role = COALESCE(excluded.role, assets.role), \
-                updated_at = excluded.updated_at, last_seen_at = excluded.last_seen_at",
-            params![
-                asset.id,
-                asset.path,
-                asset.filename,
-                asset.extension,
-                asset.asset_type,
-                asset.pack_id,
-                asset.pack_name,
-                asset.bpm,
-                asset.key_note,
-                asset.key_scale,
-                asset.duration_ms,
-                asset.sample_rate,
-                asset.channels,
-                asset.instrument,
-                asset.subtype,
-                asset.is_favorite as i64,
-                tags,
-                asset.play_count,
-                meta,
-                asset.index_status,
-                asset.bpm_source,
-                asset.key_source,
-                waveform,
-                asset.energy_level,
-                asset.texture,
-                asset.space,
-                asset.role,
-                asset.created_at,
-                asset.updated_at,
-                asset.updated_at,
-            ],
-        )?;
+            for (asset, content_hash) in items {
+                let tags = serde_json::to_string(&asset.user_tags)?;
+                let meta = serde_json::to_string(&asset.meta)?;
+                let waveform = asset.waveform_data.as_ref().map(|v| waveform_to_base64(v));
 
-        // FTS5 does not support ON CONFLICT, so delete the stale entry first to
-        // ensure the index stays current when an asset is re-indexed.
-        tx.execute("DELETE FROM assets_fts WHERE id = ?1", [&asset.id]).ok();
-        tx.execute(
-            "INSERT INTO assets_fts (id, filename, pack_name, instrument, user_tags) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![asset.id, asset.filename, asset.pack_name, asset.instrument, tags],
-        )
-        .ok();
+                // Resolve the row's id BEFORE the upsert. An existing row keeps
+                // its original (possibly legacy content-hash) id through the
+                // ON CONFLICT(path) update, and only then does the FTS index
+                // hold a stale entry to remove. `assets_fts.id` is UNINDEXED,
+                // so each FTS DELETE is a full scan of the FTS table — issuing
+                // it unconditionally made bulk indexing O(n²) in library size.
+                // Fresh inserts (the dominant bulk-index case) skip it.
+                let existing_id: Option<String> = row_id_stmt
+                    .query_row([&asset.path], |r| r.get(0))
+                    .optional()?;
+
+                upsert_stmt.execute(params![
+                    asset.id,
+                    asset.path,
+                    asset.filename,
+                    asset.extension,
+                    asset.asset_type,
+                    asset.pack_id,
+                    asset.pack_name,
+                    asset.bpm,
+                    asset.key_note,
+                    asset.key_scale,
+                    asset.duration_ms,
+                    asset.sample_rate,
+                    asset.channels,
+                    asset.instrument,
+                    asset.subtype,
+                    asset.is_favorite as i64,
+                    tags,
+                    asset.play_count,
+                    meta,
+                    asset.index_status,
+                    asset.bpm_source,
+                    asset.key_source,
+                    waveform,
+                    asset.energy_level,
+                    asset.texture,
+                    asset.space,
+                    asset.role,
+                    content_hash,
+                    asset.created_at,
+                    asset.updated_at,
+                    asset.updated_at,
+                ])?;
+
+                // FTS5 does not support ON CONFLICT: remove the stale entry
+                // (re-index only), then insert under the row's actual id.
+                let row_id = match existing_id {
+                    Some(prev) => {
+                        fts_del_stmt.execute([&prev]).ok();
+                        prev
+                    }
+                    None => asset.id.clone(),
+                };
+                fts_ins_stmt
+                    .execute(params![row_id, asset.filename, asset.pack_name, asset.instrument, tags])
+                    .ok();
+            }
+        }
         tx.commit()?;
-
         Ok(())
     }
 
@@ -342,7 +408,7 @@ impl AssetRepository {
             return Ok(());
         }
         let mut conn = self.db.get()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         {
             let mut stmt = tx.prepare_cached(
                 "UPDATE assets SET last_seen_at = ?1, index_status = 'indexed' WHERE id = ?2",
@@ -350,6 +416,54 @@ impl AssetRepository {
             for id in ids {
                 stmt.execute(params![ts, id])?;
             }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Which of the given paths already have a row? Chunked `IN` lookup used
+    /// by the reconciler — one SELECT per chunk instead of one per file.
+    pub fn existing_paths(&self, paths: &[String]) -> Result<Vec<String>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.db.get()?;
+        let mut found = Vec::with_capacity(paths.len());
+        for chunk in paths.chunks(500) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut stmt = conn.prepare(&format!(
+                "SELECT path FROM assets WHERE path IN ({})",
+                placeholders
+            ))?;
+            let rows = stmt
+                .query_map(params_from_iter(chunk.iter()), |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            found.extend(rows);
+        }
+        Ok(found)
+    }
+
+    /// Batch last_seen bump keyed by path — lets the reconciler touch a whole
+    /// scan chunk in one UPDATE without first resolving ids.
+    pub fn touch_last_seen_by_paths(&self, paths: &[String], ts: i64) -> Result<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.db.get()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for chunk in paths.chunks(500) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut params_vec: Vec<Value> = Vec::with_capacity(chunk.len() + 1);
+            params_vec.push(Value::Integer(ts));
+            params_vec.extend(chunk.iter().map(|p| Value::Text(p.clone())));
+            tx.execute(
+                &format!(
+                    "UPDATE assets SET last_seen_at = ?1, index_status = 'indexed' \
+                     WHERE path IN ({})",
+                    placeholders
+                ),
+                params_from_iter(params_vec.iter()),
+            )?;
         }
         tx.commit()?;
         Ok(())

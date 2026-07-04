@@ -1,4 +1,18 @@
 {
+  "1.0.9": {
+    "date": "2026-07-04",
+    "title": "Massive indexing & search speed-up",
+    "summary": "A ground-up performance pass for huge libraries: indexing is over 15x faster, search runs on a real full-text index, and duplicate samples no longer vanish from your packs.",
+    "highlights": [
+      "Indexing overhaul — a 290GB library with 164,000 files now indexes in about 2 minutes instead of 30+.",
+      "Instant search — queries hit a full-text index instead of scanning every entry, so results stay snappy even in six-figure libraries.",
+      "Duplicate samples fixed — byte-identical files in different packs each keep their own entry instead of silently replacing each other.",
+      "Killed the hidden re-index loop that made Stack re-process thousands of duplicated files on every launch.",
+      "Browsing and deep scrolling are dramatically faster thanks to a new sort index.",
+      "Lower memory use while indexing — huge DAW project files no longer spike RAM.",
+      "Ableton .als project info is now read correctly."
+    ]
+  },
   "1.0.8": {
     "date": "2026-07-01",
     "title": "Favorites folders & drag-to-organize",

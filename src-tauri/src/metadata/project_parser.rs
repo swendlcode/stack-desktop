@@ -292,7 +292,22 @@ mod flp_event {
     pub const ARRANGEMENT_NAME: u8 = 0xF1; // 241 — TextArrName (UTF-16-LE)
 }
 
+/// FLPs with embedded audio can reach hundreds of MB; several parsed
+/// concurrently by the indexer workers spiked resident memory past 2GB on a
+/// real library. Typical project files are a few MB — beyond the cap we skip
+/// deep parsing (filename/path metadata still applies).
+const MAX_FLP_BYTES: u64 = 64 * 1024 * 1024;
+/// Cap for text-based project formats (.als XML, .rpp).
+const MAX_TEXT_PROJECT_BYTES: u64 = 32 * 1024 * 1024;
+
 fn scan_flp(path: &Path) -> Result<FlpScan> {
+    let size = fs::metadata(path)?.len();
+    if size > MAX_FLP_BYTES {
+        return Err(crate::error::StackError::Other(format!(
+            "flp: file too large ({} bytes, cap {})",
+            size, MAX_FLP_BYTES
+        )));
+    }
     let bytes = fs::read(path)?;
 
     // Try the proper event-stream parse first; fall back to a printable-string
@@ -1024,24 +1039,50 @@ fn extract_from_filename(path: &Path) -> (Option<f32>, Option<String>) {
 
 /// Basic Ableton Live project parsing - extract minimal info from .als files
 fn parse_ableton_basic(path: &Path) -> (Option<String>, Option<u32>, Vec<String>, Option<u32>) {
-    // .als files are compressed XML, but we can try to read some basic info
-    // This is a simplified approach - full parsing would require decompression
-    match fs::read_to_string(path) {
-        Ok(content) => {
+    // .als files are gzip-compressed XML (rarely stored uncompressed).
+    // Reading them as UTF-8 always failed on the gzip container, so Ableton
+    // metadata extraction was silently a no-op — decompress (bounded) instead.
+    match read_als_xml(path) {
+        Some(content) => {
             let version = extract_version_from_xml(&content, "Creator");
-            let track_count = count_xml_elements(&content, "MidiTrack") + 
+            let track_count = count_xml_elements(&content, "MidiTrack") +
                              count_xml_elements(&content, "AudioTrack");
             let plugins = extract_plugin_names(&content);
             let sample_count = count_xml_elements(&content, "SampleRef");
-            
+
             (version, Some(track_count), plugins, Some(sample_count))
         }
-        Err(_) => (None, None, Vec::new(), None),
+        None => (None, None, Vec::new(), None),
+    }
+}
+
+/// Read an .als as XML: gunzip when it has the gzip magic, plain read
+/// otherwise. Both the compressed input and the decompressed output are
+/// size-capped so a giant project can't be buffered whole into memory.
+fn read_als_xml(path: &Path) -> Option<String> {
+    use std::io::Read;
+
+    let size = fs::metadata(path).ok()?.len();
+    if size > MAX_TEXT_PROJECT_BYTES {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut decoder =
+            flate2::read::GzDecoder::new(&bytes[..]).take(MAX_TEXT_PROJECT_BYTES * 4);
+        let mut xml = String::new();
+        decoder.read_to_string(&mut xml).ok()?;
+        Some(xml)
+    } else {
+        String::from_utf8(bytes).ok()
     }
 }
 
 /// Basic Reaper project parsing - extract info from .rpp files
 fn parse_reaper_basic(path: &Path) -> (Option<String>, Option<u32>, Vec<String>, Option<u32>) {
+    if fs::metadata(path).map(|m| m.len() > MAX_TEXT_PROJECT_BYTES).unwrap_or(true) {
+        return (None, None, Vec::new(), None);
+    }
     match fs::read_to_string(path) {
         Ok(content) => {
             let version = extract_reaper_version(&content);

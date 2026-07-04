@@ -10,7 +10,17 @@ const CHUNK: usize = 64 * 1024;
 const HEAD_BYTES: u64 = 256 * 1024;
 const TAIL_BYTES: u64 = 256 * 1024;
 
-/// Content identity hash: file size + first 256KB + last 256KB (if large enough).
+/// Stable per-path asset ID. Distinct paths get distinct rows even when their
+/// bytes are identical — duplicate-content files (rebranded packs, backup
+/// copies) must each keep their own library entry. Content equality lives in
+/// the separate `content_hash` column instead of the primary key.
+pub fn hash_path(path: &str) -> String {
+    let mut hasher = Xxh3::new();
+    hasher.update(path.as_bytes());
+    format!("{:x}", hasher.digest128())
+}
+
+/// Content hash: file size + first 256KB + last 256KB (if large enough).
 /// Avoids scanning multi-gigabyte files while still collision-resistant for music files.
 pub fn hash_file(path: &Path) -> Result<String> {
     let mut file = File::open(path)?;

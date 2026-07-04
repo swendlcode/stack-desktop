@@ -1,6 +1,6 @@
 [package]
 name = "stack"
-version = "1.0.8"
+version = "1.0.9"
 description = "Local sample library manager"
 authors = ["Stack"]
 edition = "2021"
@@ -44,6 +44,7 @@ hound = "3.5"
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "aiff"] }
 
 regex = "1"
+flate2 = "1"
 once_cell = "1"
 lazy_static = "1.4"
 base64 = "0.22"

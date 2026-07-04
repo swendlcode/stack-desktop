@@ -155,6 +155,27 @@ CREATE INDEX IF NOT EXISTS idx_watched_kind ON watched_folders(kind);
     // on first preview.
     "UPDATE assets SET waveform_data = NULL WHERE waveform_data IS NOT NULL;",
 ),
+(
+    "008_content_hash_column",
+    // Asset identity moved from content hash to per-path hash: byte-identical
+    // files at different paths used to collapse into one row (last writer
+    // stole the row's path), and every reconcile re-enqueued the losing copies
+    // — a permanent re-index loop on duplicate-heavy libraries. The content
+    // hash is kept here as a plain column for duplicate detection.
+    r#"
+ALTER TABLE assets ADD COLUMN content_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_assets_content_hash ON assets(content_hash);
+"#,
+),
+(
+    "009_filename_sort_index",
+    // Default browse sort is `filename COLLATE NOCASE`. Without a matching
+    // index every page load sorts the whole table through a temp B-tree that
+    // carries all 32 projected columns — ~300MB of sorter traffic at 164k
+    // rows, growing linearly with library size. With it, ORDER BY walks the
+    // index and only the 100 emitted rows are materialized.
+    "CREATE INDEX IF NOT EXISTS idx_assets_filename ON assets(filename COLLATE NOCASE);",
+),
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {
