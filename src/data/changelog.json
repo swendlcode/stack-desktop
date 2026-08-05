@@ -1,4 +1,18 @@
 {
+  "1.0.10": {
+    "date": "2026-08-05",
+    "title": "Plugin manager: smart uninstall & Windows support",
+    "summary": "The Plugins page now finds every plugin automatically — VST, VST3, AU, CLAP and AAX on macOS and Windows — and can fully uninstall a plugin, sweeping up presets, preferences, caches and other leftovers.",
+    "highlights": [
+      "Delete any plugin right from the Plugins page — Stack finds its leftovers (presets, preferences, caches, vendor data, even iCloud copies) and shows exactly what will be removed before anything is touched.",
+      "Deleting one format offers the others too — remove the VST3 and the AU / VST / AAX copies of the same plugin can go with it.",
+      "Files in system folders are removed with a single administrator prompt.",
+      "CLAP and AAX plugins are now detected alongside VST, VST3 and AU.",
+      "Full Windows support — all standard folders plus the registry-configured VST2 path are scanned, and registry leftovers are cleaned up on uninstall.",
+      "Plugin rows now show vendor, size on disk, and which other formats are installed.",
+      "No more folder hunting — every standard plugin location is scanned out of the box; extra folders moved to Settings → Plugins."
+    ]
+  },
   "1.0.9": {
     "date": "2026-07-04",
     "title": "Massive indexing & search speed-up",

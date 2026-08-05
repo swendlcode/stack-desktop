@@ -366,6 +366,8 @@ pub fn run() {
             commands::settings_commands::update_settings,
             commands::settings_commands::sync_autostart,
             commands::plugin_commands::scan_plugins,
+            commands::plugin_commands::find_plugin_leftovers,
+            commands::plugin_commands::delete_plugin,
             commands::project_commands::open_project_in_daw,
             commands::project_commands::open_with_default_app,
             commands::url_image_commands::fetch_url_image,

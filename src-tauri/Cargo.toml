@@ -1,6 +1,6 @@
 [package]
 name = "stack"
-version = "1.0.9"
+version = "1.0.10"
 description = "Local sample library manager"
 authors = ["Stack"]
 edition = "2021"
@@ -38,6 +38,7 @@ notify-debouncer-full = "0.3"
 walkdir = "2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+plist = "1"
 
 midly = "0.5"
 hound = "3.5"
@@ -61,3 +62,6 @@ axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"

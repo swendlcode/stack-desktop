@@ -29,6 +29,7 @@ const WEB_UI_URL = import.meta.env.DEV
   : 'http://localhost:9870';
 import { Slider } from '../components/ui/Slider';
 import { ThemeSettings } from '../components/settings/ThemeSettings';
+import { PluginFolderSettings } from '../components/settings/PluginFolderSettings';
 import { packQueryKeys } from '../hooks/usePacks';
 import { assetQueryKeys } from '../hooks/useAssets';
 import { libraryTreeKey } from '../hooks/useLibraryTree';
@@ -686,6 +687,14 @@ export function SettingsPage() {
               onChange={handlePlaygroundModeToggle}
             />
           </SettingRow>
+        </SettingSection>
+
+        {/* ── Plugins ── */}
+        <SettingSection
+          title="Plugins"
+          description="Standard VST, VST3, AU, CLAP and AAX locations are scanned automatically."
+        >
+          <PluginFolderSettings />
         </SettingSection>
 
         {/* ── Library ── */}

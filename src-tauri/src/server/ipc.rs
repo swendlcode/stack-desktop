@@ -109,7 +109,15 @@ pub async fn dispatch(app: AppHandle, cmd: &str, body: Value) -> Result<Value, S
         "sync_autostart" => to_val(sc::sync_autostart(app.clone(), app.state()).await?),
 
         // ── plugins / project / misc ────────────────────────────────────────
-        "scan_plugins" => to_val(plg::scan_plugins(f!("formats"), f!("extraPaths"))?),
+        "scan_plugins" => to_val(plg::scan_plugins(f!("formats"), f!("extraPaths")).await?),
+        "find_plugin_leftovers" => {
+            to_val(plg::find_plugin_leftovers(f!("pluginPath"), f!("extraPaths")).await?)
+        }
+        // NOTE: over the web bridge the elevation prompt appears on the host
+        // machine running Stack, not in the browser.
+        "delete_plugin" => to_val(
+            plg::delete_plugin(f!("paths"), f!("registryKeys"), f!("extraRoots")).await?,
+        ),
         "open_project_in_daw" => to_val(prj::open_project_in_daw(f!("projectPath")).await?),
         "open_with_default_app" => to_val(prj::open_with_default_app(f!("path")).await?),
         "fetch_url_image" => {
