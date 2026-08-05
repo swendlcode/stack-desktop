@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
-import { Refresh } from '../components/ui/icons';
-import { PluginList } from '../components/plugins/PluginList';
+import { Input } from '../components/ui/Input';
+import { CloseCircle, Refresh, SearchNormal } from '../components/ui/icons';
+import { PluginColumnHeader, PluginList } from '../components/plugins/PluginList';
 import { DeletePluginModal } from '../components/plugins/DeletePluginModal';
 import { usePluginScan } from '../hooks/usePlugins';
 import { loadCustomPluginPaths } from '../utils/pluginPaths';
@@ -24,22 +25,35 @@ export function PluginsPage() {
   // in Settings and only read here.
   const [customPaths] = useState<string[]>(loadCustomPluginPaths);
   const [mode, setMode] = useState<FilterMode>('all');
+  const [search, setSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<PluginEntry | null>(null);
 
   const { data: plugins = [], isLoading, isFetching, refetch } = usePluginScan(customPaths);
 
   const filtered = useMemo(() => {
-    if (mode === 'all') return plugins;
-    if (mode === 'vsti') return plugins.filter((p) => p.kind === 'instrument');
-    return plugins.filter((p) => p.format === mode);
-  }, [plugins, mode]);
+    let list = plugins;
+    if (mode === 'vsti') list = list.filter((p) => p.kind === 'instrument');
+    else if (mode !== 'all') list = list.filter((p) => p.format === mode);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.vendor?.toLowerCase().includes(q) ?? false) ||
+          p.path.toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [plugins, mode, search]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-14 shrink-0 items-center border-b border-gray-700 px-6">
         <h2 className="text-lg font-bold text-stack-white">Plugins</h2>
         <div className="mono ml-auto mr-4 text-xs text-gray-400">
-          {plugins.length.toLocaleString()} {plugins.length === 1 ? 'plugin' : 'plugins'}
+          {search || mode !== 'all'
+            ? `${filtered.length.toLocaleString()} of ${plugins.length.toLocaleString()} plugins`
+            : `${plugins.length.toLocaleString()} ${plugins.length === 1 ? 'plugin' : 'plugins'}`}
         </div>
         <Button
           variant="secondary"
@@ -52,8 +66,25 @@ export function PluginsPage() {
         </Button>
       </div>
 
-      <div className="shrink-0 border-b border-gray-700/70 px-6 py-3">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="shrink-0 border-b border-gray-700/70 px-6 py-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Input
+            className="w-72"
+            placeholder="Search plugins…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            leading={
+              <SearchNormal size={15} color="var(--color-text-muted)" variant="Linear" />
+            }
+            trailing={
+              search ? (
+                <button onClick={() => setSearch('')} aria-label="Clear search">
+                  <CloseCircle size={15} color="var(--color-text-muted)" variant="Linear" />
+                </button>
+              ) : null
+            }
+          />
+          <div className="h-5 w-px bg-gray-700" />
           {BUTTONS.map((b) => {
             const active = mode === b.id;
             return (
@@ -73,18 +104,28 @@ export function PluginsPage() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
+      {!isLoading && filtered.length > 0 && <PluginColumnHeader />}
+
+      <div className="min-h-0 flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex h-full items-center justify-center text-gray-500">
             Scanning plugins...
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-gray-500">
-            <div className="text-lg font-semibold text-gray-400">No plugins found</div>
+            <div className="text-lg font-semibold text-gray-400">
+              {search ? 'No plugins match your search' : 'No plugins found'}
+            </div>
             <div className="text-sm">
-              Plugins installed in the standard system locations appear here automatically.
-              <br />
-              Extra folders can be added in Settings.
+              {search ? (
+                'Try a different name, vendor, or path.'
+              ) : (
+                <>
+                  Plugins installed in the standard system locations appear here automatically.
+                  <br />
+                  Extra folders can be added in Settings.
+                </>
+              )}
             </div>
           </div>
         ) : (

@@ -1,4 +1,14 @@
 {
+  "1.0.11": {
+    "date": "2026-08-05",
+    "title": "Plugins page: search & table view",
+    "summary": "The Plugins page now reads like a proper table — aligned columns with a header row — and has instant search across plugin names, vendors, and paths.",
+    "highlights": [
+      "Search your plugins instantly by name, vendor, or install path.",
+      "New table layout with a column header — Format, Name, Vendor, Path, Size, and Type line up in proper grid rows.",
+      "The plugin counter shows how many match your current search and filter."
+    ]
+  },
   "1.0.10": {
     "date": "2026-08-05",
     "title": "Plugin manager: smart uninstall & Windows support",
