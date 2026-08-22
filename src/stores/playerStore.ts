@@ -11,8 +11,10 @@ interface PlayerStore {
   currentTime: number;
   duration: number;
   bpmSync: number | null;
+  /** Seconds to start from on the next asset switch — set by play(asset, startAt). */
+  pendingStartAt: number;
 
-  play: (asset: Asset) => void;
+  play: (asset: Asset, startAt?: number) => void;
   pause: () => void;
   resume: () => void;
   stop: () => void;
@@ -36,10 +38,17 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   currentTime: 0,
   duration: 0,
   bpmSync: null,
+  pendingStartAt: 0,
   seekTo: null,
 
-  play: (asset) =>
-    set({ currentAsset: asset, isPlaying: true, currentTime: 0, duration: 0 }),
+  play: (asset, startAt = 0) =>
+    set({
+      currentAsset: asset,
+      isPlaying: true,
+      currentTime: startAt,
+      duration: 0,
+      pendingStartAt: startAt,
+    }),
   pause: () => set({ isPlaying: false }),
   resume: () => set({ isPlaying: true }),
   stop: () => set({ isPlaying: false, currentTime: 0 }),

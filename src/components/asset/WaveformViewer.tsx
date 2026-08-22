@@ -47,6 +47,8 @@ export function WaveformViewer({
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!onSeek) return;
+    // Seeking is the whole gesture — don't let the row's click handler fire too.
+    e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
     const fraction = (e.clientX - rect.left) / rect.width;
     onSeek(Math.max(0, Math.min(1, fraction)));

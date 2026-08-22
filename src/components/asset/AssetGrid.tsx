@@ -135,9 +135,14 @@ export function AssetGrid({
     scrollMargin,
   });
 
-  // Scroll selected row into view
+  // Set on pointer clicks so the scroll-into-view effect below knows the
+  // selection came from the mouse (row already visible — don't nudge the list).
+  const lastPointerSelectRef = useRef(0);
+
+  // Scroll selected row into view (keyboard / external selection only)
   useEffect(() => {
     if (selectedIndex !== null && selectedIndex >= 0 && selectedIndex < assets.length) {
+      if (performance.now() - lastPointerSelectRef.current < 500) return;
       const scrollEl = scrollContainerRef?.current ?? internalScrollRef.current;
       if (!scrollEl) return;
       const raf = window.requestAnimationFrame(() => {
@@ -220,6 +225,7 @@ export function AssetGrid({
     (index: number, e: React.MouseEvent) => {
       const asset = assets[index];
       if (!asset) return;
+      lastPointerSelectRef.current = performance.now();
 
       const isMeta = e.metaKey || e.ctrlKey;
       const isShift = e.shiftKey;

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { packService } from '../services/packService';
 import { useSetPackArtwork, useClearPackArtwork } from './usePacks';
 
@@ -52,6 +53,23 @@ export function useCoverUpload(packRoot: string, onDone: () => void) {
       setError(`Save failed: ${String(err)}`);
     } finally {
       setBusy('idle');
+    }
+  };
+
+  /**
+   * Native (Tauri) file drop hands us a path, not a File — read it back
+   * through the asset protocol so the same upload path applies.
+   */
+  const handleDroppedPath = async (path: string) => {
+    setError(null);
+    try {
+      const res = await fetch(convertFileSrc(path));
+      if (!res.ok) throw new Error(`could not read ${path}`);
+      const blob = await res.blob();
+      setPreviewUrl(URL.createObjectURL(blob));
+      await uploadBlob(blob, path);
+    } catch (e) {
+      setError(`Drop failed: ${String(e)}`);
     }
   };
 
@@ -130,6 +148,6 @@ export function useCoverUpload(packRoot: string, onDone: () => void) {
   return {
     preview, urlDraft, setUrlDraft, error, busy, working,
     hasExistingCover: clearArtwork.isSuccess ? false : true,
-    handleFile, handlePasteEvent, pasteFromClipboard, fetchFromUrl, clearCover,
+    handleFile, handleDroppedPath, handlePasteEvent, pasteFromClipboard, fetchFromUrl, clearCover,
   };
 }

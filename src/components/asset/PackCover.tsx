@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePackCover } from '../../hooks/usePackCover';
 import { Music } from '../ui/icons';
 
@@ -16,6 +16,9 @@ interface PackCoverProps {
 export function PackCover({ packRoot, packName, size = 38 }: PackCoverProps) {
   const { data: coverUrl } = usePackCover(packRoot);
   const [imgError, setImgError] = useState(false);
+  // A failed load must not poison future URLs — after a new cover is saved the
+  // query yields a fresh cache-busted URL and we must try it again.
+  useEffect(() => setImgError(false), [coverUrl]);
 
   const label = packName ?? packRoot?.split(/[/\\]/).filter(Boolean).pop() ?? '?';
 

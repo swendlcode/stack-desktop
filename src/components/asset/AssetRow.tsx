@@ -1,4 +1,4 @@
-import { useState, memo, useMemo } from "react";
+import { useState, useRef, memo, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { Asset } from "../../types";
@@ -121,22 +121,51 @@ export const AssetRow = memo(function AssetRow({
       ? Math.min(1, Math.max(0, currentTime / duration))
       : 0;
 
-  const togglePlay = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  // Start (or seek) this row at a 0–1 position along its length.
+  const playFrom = (fraction: number) => {
+    if (isActive) {
+      const { seekTo, duration: d } = usePlayerStore.getState();
+      if (seekTo && d > 0) seekTo(fraction * d);
+      if (!isPlaying) resume();
+      return;
+    }
+    const isEdited = editorAssetId !== null && asset.type === "sample";
+    if (isEdited) {
+      openEditor(asset.id);
+    }
+    const totalSec = asset.durationMs ? asset.durationMs / 1000 : 0;
+    const offsetSec = totalSec > 0 ? fraction * totalSec : 0;
+    if (asset.type === "sample" && !isEdited) {
+      // Fire audio immediately like arrow keys do, before React state update
+      audioEngine.playBuffer(asset.path, offsetSec);
+    }
+    play(asset, offsetSec);
+    onPreview?.(asset);
+  };
+
+  const toggleRowPlayback = () => {
     if (isActive) {
       isPlaying ? stop() : resume();
     } else {
-      // Fire audio immediately like arrow keys do, before React state update
-      const isEdited = editorAssetId !== null && asset.type === "sample";
-      if (isEdited) {
-        openEditor(asset.id);
-      }
-      if (asset.type === "sample" && !isEdited) {
-        audioEngine.playBuffer(asset.path, 0);
-      }
-      play(asset);
-      onPreview?.(asset);
+      playFrom(0);
     }
+  };
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleRowPlayback();
+  };
+
+  // Whole row is clickable: plain click auditions, modifier clicks only select.
+  const lastRowClickRef = useRef(0);
+  const handleRowClick = (e: React.MouseEvent) => {
+    onRowClick?.(e);
+    if (e.metaKey || e.ctrlKey || e.shiftKey || !canPlay) return;
+    // Second click of a double-click: keep playing and let onDoubleClick open details.
+    const now = performance.now();
+    if (now - lastRowClickRef.current < 300) return;
+    lastRowClickRef.current = now;
+    toggleRowPlayback();
   };
 
   const toggleFav = async (e: React.MouseEvent) => {
@@ -344,7 +373,7 @@ export const AssetRow = memo(function AssetRow({
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={onRowClick}
+      onClick={handleRowClick}
       onDoubleClick={() => {
         if (asset.type === "project") {
           openProjectTimeline();
@@ -501,15 +530,7 @@ export const AssetRow = memo(function AssetRow({
                     assetId={asset.id}
                     height={36}
                     progress={progress}
-                    onSeek={
-                      isActive
-                        ? (fraction) => {
-                            const { seekTo, duration: d } =
-                              usePlayerStore.getState();
-                            if (seekTo && d > 0) seekTo(fraction * d);
-                          }
-                        : undefined
-                    }
+                    onSeek={playFrom}
                   />
                 ) : asset.type === "midi" ? (
                   <MidiViewer

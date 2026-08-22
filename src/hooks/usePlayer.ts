@@ -512,11 +512,12 @@ export function usePlayer() {
       midiNotesRef.current = [];
       midiDurationRef.current = 0;
 
-      // Detect asset switch — reset pause position so we start from the beginning
+      // Detect asset switch — start from the requested offset (0 unless the
+      // caller clicked into a waveform), which every start path below honors.
       const assetChanged = currentAssetIdRef.current !== currentAsset.id;
       if (assetChanged) {
         currentAssetIdRef.current = currentAsset.id;
-        pausedAtRef.current = 0;
+        pausedAtRef.current = usePlayerStore.getState().pendingStartAt;
       }
 
       const isEdited = editorAssetId === currentAsset.id;

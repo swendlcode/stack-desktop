@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { isTauri } from '../../lib/tauri-core';
 import { usePackCover } from '../../hooks/usePackCover';
 import { useCoverUpload } from '../../hooks/useCoverUpload';
+import { useStackDropZoneStore } from '../../stores/stackDropZoneStore';
 import { CloseCircle, GalleryAdd, Copy, Trash } from '../ui/icons';
 
 interface Props {
@@ -14,6 +17,50 @@ export function CoverEditorModal({ packRoot, packName, onClose }: Props) {
   const up = useCoverUpload(packRoot, onClose);
   const [hot, setHot] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dropRef = useRef(up.handleDroppedPath);
+  dropRef.current = up.handleDroppedPath;
+
+  // Tauri intercepts OS file drops (dragDropEnabled), so the DOM drop event
+  // carries no files — listen to the native event and hit-test our panel.
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const inPanel = (pos: { x: number; y: number }) => {
+      const rect = panelRef.current?.getBoundingClientRect();
+      if (!rect) return false;
+      const scale = window.devicePixelRatio || 1;
+      const x = pos.x / scale;
+      const y = pos.y / scale;
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const p = event.payload;
+        // Ignore our own row drag-outs (handled by useStackDropListener).
+        if (useStackDropZoneStore.getState().draggingAssets.length > 0) return;
+        if (p.type === 'leave') {
+          setHot(false);
+          return;
+        }
+        const inside = inPanel(p.position);
+        if (p.type === 'drop') {
+          setHot(false);
+          if (inside && p.paths.length > 0) void dropRef.current(p.paths[0]);
+          return;
+        }
+        setHot(inside);
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -32,6 +79,7 @@ export function CoverEditorModal({ packRoot, packName, onClose }: Props) {
       aria-label="Edit folder cover"
     >
       <div
+        ref={panelRef}
         className="w-[min(520px,94vw)] overflow-hidden rounded-lg border border-gray-700 bg-stack-black shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         onPaste={up.handlePasteEvent}

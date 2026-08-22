@@ -1,4 +1,16 @@
 {
+  "1.0.12": {
+    "date": "2026-08-22",
+    "title": "Click-to-play samples & cover fixes",
+    "summary": "Audition samples by clicking anywhere on a row, jump straight to a spot in the waveform, and pack covers now save reliably — including drag-and-drop from Finder.",
+    "highlights": [
+      "Click anywhere on a sample row to play it — no need to aim for the play button.",
+      "Click a point on any waveform to start playing from exactly there, even if that sample isn't playing yet.",
+      "Fixed the list jumping when clicking samples near the bottom or top of the view.",
+      "Pack cover: dragging an image from Finder onto the cover editor now works.",
+      "Pack cover: a newly saved cover no longer stays hidden behind the placeholder icon."
+    ]
+  },
   "1.0.11": {
     "date": "2026-08-05",
     "title": "Plugins page: search & table view",
