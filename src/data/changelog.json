@@ -1,4 +1,19 @@
 {
+  "1.0.13": {
+    "date": "2026-09-08",
+    "title": "Compact view, custom columns & Intel Mac support",
+    "summary": "Browse big libraries faster with a compact list view and columns you choose yourself, your sort order now survives restarts, and Stack finally runs on Intel Macs.",
+    "highlights": [
+      "Intel Mac support — the macOS download is now a universal build that runs on both Apple Silicon and Intel.",
+      "Compact list view — denser rows that fit far more samples on screen. Toggle it in Settings or from the column header.",
+      "Choose your columns — right-click the column header to show or hide Waveform, Time, Key, BPM and the new Folder column.",
+      "New Folder column shows where each sample lives, and clicking it jumps straight to that folder.",
+      "Your sort order is remembered between sessions — no more resetting to Most Recent on every launch.",
+      "Sorting by Name now starts A to Z, and Most Recent starts newest first.",
+      "Click a folder in the sidebar to open and expand it — no need to hit the small arrow. Expanded folders are remembered too.",
+      "Fixed column headers showing Waveform, Key or BPM labels when those columns were turned off."
+    ]
+  },
   "1.0.12": {
     "date": "2026-08-22",
     "title": "Click-to-play samples & cover fixes",

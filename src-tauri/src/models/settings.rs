@@ -49,6 +49,15 @@ pub struct Settings {
     /// Stick the toolbar + column header to the top when scrolling inside a folder
     #[serde(default = "default_true")]
     pub sticky_toolbar: bool,
+    /// Denser asset rows: smaller artwork, no category line
+    #[serde(default)]
+    pub compact_list: bool,
+    /// Show the duration column on asset rows
+    #[serde(default = "default_true")]
+    pub show_time_badge: bool,
+    /// Show the folder-path column on asset rows
+    #[serde(default)]
+    pub show_folder_column: bool,
 }
 
 impl Default for Settings {
@@ -70,6 +79,9 @@ impl Default for Settings {
             launch_at_startup: false,
             confirm_folder_removal: true,
             sticky_toolbar: true,
+            compact_list: false,
+            show_time_badge: true,
+            show_folder_column: false,
         }
     }
 }

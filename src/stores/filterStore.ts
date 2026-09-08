@@ -41,9 +41,35 @@ function toggle<T>(list: T[], item: T): T[] {
   return list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
 }
 
+const SORT_KEY = 'stack:sort';
+
+function loadSort(): SortOptions {
+  try {
+    const raw = localStorage.getItem(SORT_KEY);
+    if (!raw) return DEFAULT_SORT;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.field === 'string' &&
+      (parsed.direction === 'asc' || parsed.direction === 'desc')
+    ) {
+      // Never resurrect shuffle across launches — it's a one-shot gesture.
+      if (parsed.field === 'random') return DEFAULT_SORT;
+      return parsed as SortOptions;
+    }
+  } catch {}
+  return DEFAULT_SORT;
+}
+
+function saveSort(sort: SortOptions) {
+  try {
+    localStorage.setItem(SORT_KEY, JSON.stringify(sort));
+  } catch {}
+}
+
 export const useFilterStore = create<FilterStore>((set) => ({
   filters: DEFAULT_FILTERS,
-  sort: DEFAULT_SORT,
+  sort: loadSort(),
 
   setQuery: (query) => set((s) => ({ filters: { ...s.filters, query } })),
 
@@ -97,7 +123,10 @@ export const useFilterStore = create<FilterStore>((set) => ({
   setPathPrefix: (pathPrefix) =>
     set((s) => ({ filters: { ...s.filters, pathPrefix } })),
 
-  setSort: (sort) => set({ sort }),
+  setSort: (sort) => {
+    saveSort(sort);
+    set({ sort });
+  },
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
 
   toggleEnergyLevel: (level) =>

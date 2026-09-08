@@ -11,8 +11,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Universal binary so the DMG runs on both Apple Silicon and Intel Macs.
+          # GitHub's macOS runners are arm64 only, so x86_64 is cross-compiled.
           - os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
           - os: windows-latest
+            rust-targets: ''
+            args: ''
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -29,6 +35,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -76,3 +84,4 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
+          args: ${{ matrix.args }}

@@ -16,6 +16,13 @@ const SORT_FIELDS: Array<{ field: SortField; label: string }> = [
   { field: 'added',    label: 'Date Added' },
 ];
 
+// Recency/usage fields read naturally newest/most first; the rest A→Z, low→high.
+const DEFAULT_DIRECTION: Record<string, 'asc' | 'desc'> = {
+  mostRecent: 'desc',
+  mostUsed: 'desc',
+  added: 'desc',
+};
+
 function SortDropdown() {
   const sort = useFilterStore((s) => s.sort);
   const setSort = useFilterStore((s) => s.setSort);
@@ -108,12 +115,17 @@ function SortDropdown() {
               <button
                 key={f.field}
                 onClick={() => {
+                  // Re-picking the current field flips direction; a new field
+                  // starts at its natural direction.
+                  const natural = DEFAULT_DIRECTION[f.field] ?? 'asc';
                   setSort({
                     field: f.field,
                     direction:
-                      sort.field === f.field && sort.direction === 'asc'
-                        ? 'desc'
-                        : 'asc',
+                      sort.field === f.field
+                        ? sort.direction === 'asc'
+                          ? 'desc'
+                          : 'asc'
+                        : natural,
                   });
                   setOpen(false);
                 }}

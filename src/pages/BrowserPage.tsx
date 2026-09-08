@@ -76,6 +76,12 @@ export function BrowserPage() {
           <AssetColumnHeader
             viewType={viewType}
             pageAssetIds={assets.map((a) => a.id)}
+            showWaveform={settings?.showWaveform ?? true}
+            showBpmBadge={settings?.showBpmBadge ?? true}
+            showKeyBadge={settings?.showKeyBadge ?? true}
+            showTimeBadge={settings?.showTimeBadge ?? true}
+            showFolderColumn={settings?.showFolderColumn ?? false}
+            compact={settings?.compactList ?? false}
           />
         </div>
 

@@ -429,6 +429,9 @@ const DEFAULT_SETTINGS: Settings = {
   launchAtStartup: false,
   confirmFolderRemoval: true,
   stickyToolbar: true,
+  compactList: false,
+  showTimeBadge: true,
+  showFolderColumn: false,
 };
 
 export function SettingsPage() {
@@ -631,6 +634,15 @@ export function SettingsPage() {
             <Toggle
               checked={showProjectsNav}
               onChange={setShowProjectsNav}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Compact list view"
+            description="Denser rows without the category line — see more samples at once. Right-click the column header to toggle individual columns."
+          >
+            <Toggle
+              checked={settings.compactList}
+              onChange={(v) => updateAndSave({ compactList: v })}
             />
           </SettingRow>
           <SettingRow

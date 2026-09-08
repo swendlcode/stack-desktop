@@ -277,6 +277,28 @@ function applyLiveDeltas(
   return roots.map(applyNode);
 }
 
+const EXPANDED_KEY = 'stack:expandedFolders';
+
+function loadExpanded(): Set<string> {
+  try {
+    const raw = localStorage.getItem(EXPANDED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const expandedPaths = loadExpanded();
+
+function rememberExpanded(path: string, open: boolean) {
+  if (open) expandedPaths.add(path);
+  else expandedPaths.delete(path);
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expandedPaths]));
+  } catch {}
+}
+
 function TreeNodeView({
   node,
   depth,
@@ -308,7 +330,11 @@ function TreeNodeView({
   dragging: boolean;
   playgroundEnabled: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpenState] = useState(() => defaultOpen || expandedPaths.has(node.path));
+  const setOpen = (next: boolean) => {
+    rememberExpanded(node.path, next);
+    setOpenState(next);
+  };
   const pathPrefix = useFilterStore((s) => s.filters.pathPrefix);
   const setPathPrefix = useFilterStore((s) => s.setPathPrefix);
   const setActivePage = useUiStore((s) => s.setActivePage);
@@ -343,7 +369,7 @@ function TreeNodeView({
         style={{ paddingLeft: `${6 + depth * 12}px` }}
       >
         <button
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => setOpen(!open)}
           disabled={!hasChildren}
           className="flex h-6 w-5 shrink-0 items-center justify-center text-gray-500 disabled:opacity-0"
           aria-label={open ? 'Collapse' : 'Expand'}
@@ -370,6 +396,12 @@ function TreeNodeView({
             }
             setSelectedPaths([node.path]);
             selectThisNode();
+            // Opening a folder should also reveal its children — no need to
+            // aim for the tiny arrow. Collapse stays on the arrow/double-click.
+            if (hasChildren && !open) setOpen(true);
+          }}
+          onDoubleClick={() => {
+            if (hasChildren) setOpen(!open);
           }}
           onMouseDown={(e) => {
             if (e.button !== 0) return;

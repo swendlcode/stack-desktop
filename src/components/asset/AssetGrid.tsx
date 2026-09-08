@@ -29,6 +29,7 @@ interface AssetGridProps {
 }
 
 const ROW_HEIGHT = 64;
+const COMPACT_ROW_HEIGHT = 40;
 const FOOTER_HEIGHT = 52;
 
 export function AssetGrid({
@@ -60,6 +61,9 @@ export function AssetGrid({
   const showWaveform = settings?.showWaveform ?? true;
   const showBpmBadge = settings?.showBpmBadge ?? true;
   const showKeyBadge = settings?.showKeyBadge ?? true;
+  const showTimeBadge = settings?.showTimeBadge ?? true;
+  const showFolderColumn = settings?.showFolderColumn ?? false;
+  const compactList = settings?.compactList ?? false;
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const selectedIndexRef = useRef<number | null>(null);
@@ -130,10 +134,15 @@ export function AssetGrid({
   const virtualizer = useVirtualizer({
     count: assets.length,
     getScrollElement: () => scrollContainerRef?.current ?? internalScrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => (compactList ? COMPACT_ROW_HEIGHT : ROW_HEIGHT),
     overscan: 10,
     scrollMargin,
   });
+
+  // Cached row measurements go stale when density flips.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [compactList, virtualizer]);
 
   // Set on pointer clicks so the scroll-into-view effect below knows the
   // selection came from the mouse (row already visible — don't nudge the list).
@@ -328,6 +337,9 @@ export function AssetGrid({
           showWaveform={showWaveform}
           showBpmBadge={showBpmBadge}
           showKeyBadge={showKeyBadge}
+          showTimeBadge={showTimeBadge}
+          showFolderColumn={showFolderColumn}
+          compact={compactList}
         />
       )}
 
@@ -377,6 +389,9 @@ export function AssetGrid({
                   showWaveform={showWaveform}
                   showBpmBadge={showBpmBadge}
                   showKeyBadge={showKeyBadge}
+                  showTimeBadge={showTimeBadge}
+                  showFolderColumn={showFolderColumn}
+                  compact={compactList}
                 />
               </div>
             );

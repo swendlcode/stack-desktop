@@ -56,6 +56,9 @@ interface AssetRowProps {
   showWaveform?: boolean;
   showBpmBadge?: boolean;
   showKeyBadge?: boolean;
+  showTimeBadge?: boolean;
+  showFolderColumn?: boolean;
+  compact?: boolean;
 }
 
 export const AssetRow = memo(function AssetRow({
@@ -71,6 +74,9 @@ export const AssetRow = memo(function AssetRow({
   showWaveform = true,
   showBpmBadge = true,
   showKeyBadge = true,
+  showTimeBadge = true,
+  showFolderColumn = false,
+  compact = false,
 }: AssetRowProps) {
   // Tier 1: ref-stable fields every row needs. Shallow-compared so a
   // currentTime tick doesn't invalidate this selector for any row.
@@ -238,6 +244,19 @@ export const AssetRow = memo(function AssetRow({
     }
   };
 
+  // "PackName/sub/folder" when the file lives under its pack, else the last
+  // two path segments — enough to place the sample without the full path.
+  const folderLabel = (() => {
+    const norm = asset.path.replace(/\\/g, "/");
+    const dir = norm.slice(0, norm.lastIndexOf("/"));
+    if (packRoot) {
+      const rootNorm = packRoot.replace(/\\/g, "/");
+      const rootName = rootNorm.split("/").filter(Boolean).pop() ?? "";
+      if (dir.startsWith(rootNorm)) return rootName + dir.slice(rootNorm.length);
+    }
+    return dir.split("/").filter(Boolean).slice(-2).join("/");
+  })();
+
   const categoryLabel =
     [asset.instrument, asset.subtype].filter(Boolean).join(" · ") || asset.type;
   const displayName =
@@ -350,7 +369,7 @@ export const AssetRow = memo(function AssetRow({
                 ? "bg-gray-800/70"
                 : ""
       }`}
-      style={{ height: 64, paddingLeft: "12px", paddingRight: "12px" }}
+      style={{ height: compact ? 40 : 64, paddingLeft: "12px", paddingRight: "12px" }}
       draggable
       onDragStart={(e) => {
         e.preventDefault();
@@ -418,7 +437,7 @@ export const AssetRow = memo(function AssetRow({
           title={`Go to ${asset.packName ?? "pack folder"}`}
           aria-label="Go to pack folder"
         >
-          <PackCover packRoot={packRoot} packName={asset.packName} size={42} />
+          <PackCover packRoot={packRoot} packName={asset.packName} size={compact ? 28 : 42} />
         </button>
 
         {/* Play / Open */}
@@ -488,9 +507,11 @@ export const AssetRow = memo(function AssetRow({
           >
             {displayName}
           </button>
-          <div className="truncate text-xs capitalize leading-tight text-gray-500 mt-0.5">
-            {categoryLabel}
-          </div>
+          {!compact && (
+            <div className="truncate text-xs capitalize leading-tight text-gray-500 mt-0.5">
+              {categoryLabel}
+            </div>
+          )}
         </div>
       </div>
 
@@ -528,17 +549,17 @@ export const AssetRow = memo(function AssetRow({
                 {asset.type === "sample" ? (
                   <WaveformViewer
                     assetId={asset.id}
-                    height={36}
+                    height={compact ? 20 : 36}
                     progress={progress}
                     onSeek={playFrom}
                   />
                 ) : asset.type === "midi" ? (
                   <MidiViewer
                     notes={(asset.meta as MidiMeta)?.pianoRoll ?? []}
-                    height={36}
+                    height={compact ? 20 : 36}
                   />
                 ) : (
-                  <div className="flex h-9 w-full items-center justify-center rounded-lg bg-gray-800">
+                  <div className={`flex w-full items-center justify-center rounded-lg bg-gray-800 ${compact ? "h-5" : "h-9"}`}>
                     <Icon
                       size={18}
                       color="var(--color-text-muted)"
@@ -549,12 +570,14 @@ export const AssetRow = memo(function AssetRow({
               </div>
             )}
 
-            <div
-              className="mono shrink-0 text-right text-xs sm:text-sm text-gray-500"
-              style={{ minWidth: "40px" }}
-            >
-              {formatDuration(asset.durationMs)}
-            </div>
+            {showTimeBadge && (
+              <div
+                className="mono shrink-0 text-right text-xs sm:text-sm text-gray-500"
+                style={{ minWidth: "40px" }}
+              >
+                {formatDuration(asset.durationMs)}
+              </div>
+            )}
 
             {showKeyBadge && (
               <div
@@ -588,6 +611,21 @@ export const AssetRow = memo(function AssetRow({
           </>
         )}
       </div>
+
+      {/* ══ FOLDER: optional path column ══ */}
+      {showFolderColumn && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            goToFolder();
+          }}
+          className="mono hidden shrink-0 truncate text-left text-[11px] text-gray-500 transition-colors hover:text-stack-white xl:block"
+          style={{ width: 160 }}
+          title={asset.path}
+        >
+          {folderLabel}
+        </button>
+      )}
 
       {/* ══ RIGHT: Favorite · More ══ */}
       <div

@@ -31,4 +31,7 @@ export interface Settings {
   confirmFolderRemoval: boolean;
   // Browser
   stickyToolbar: boolean;
+  compactList: boolean;
+  showTimeBadge: boolean;
+  showFolderColumn: boolean;
 }
