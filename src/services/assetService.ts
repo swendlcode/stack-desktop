@@ -12,9 +12,19 @@ export interface FacetCount {
   count: number;
 }
 
+export interface SearchSuggestions {
+  /** Prefix matches for the word being typed. */
+  completions: string[];
+  /** Nearest real terms when the typed word matches nothing. */
+  corrections: string[];
+  /** Most common terms in the library — shown on an empty box. */
+  popular: string[];
+}
+
 export interface FacetCounts {
   instruments: FacetCount[];
   subtypes: FacetCount[];
+  genres: FacetCount[];
   energyLevels: FacetCount[];
   textures: FacetCount[];
   spaces: FacetCount[];
@@ -63,6 +73,10 @@ export const assetService = {
 
   getMidiNotes(id: string): Promise<MidiNote[]> {
     return invoke('get_midi_notes', { id });
+  },
+
+  getSearchSuggestions(query: string): Promise<SearchSuggestions> {
+    return invoke('get_search_suggestions', { query });
   },
 
   getFacetCounts(filters: AssetFilters): Promise<FacetCounts> {

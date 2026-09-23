@@ -176,6 +176,55 @@ CREATE INDEX IF NOT EXISTS idx_assets_content_hash ON assets(content_hash);
     // index and only the 100 emitted rows are materialized.
     "CREATE INDEX IF NOT EXISTS idx_assets_filename ON assets(filename COLLATE NOCASE);",
 ),
+(
+    "010_asset_genre_and_fts",
+    // `genre` was detected by path_parser from the first release but never
+    // stored, so it could not be filtered or searched. Add the column, and
+    // rebuild the FTS index with `subtype` and `genre` so terms like "kick"
+    // or "amapiano" are searchable and show up in the fts5vocab term list
+    // that powers search suggestions. The rebuild leaves the table empty;
+    // `core::genre_backfill` repopulates it (and fills genre) on next launch.
+    r#"
+ALTER TABLE assets ADD COLUMN genre TEXT;
+CREATE INDEX IF NOT EXISTS idx_assets_genre ON assets(genre);
+
+DROP TABLE IF EXISTS assets_fts;
+CREATE VIRTUAL TABLE assets_fts USING fts5(
+  id UNINDEXED,
+  filename,
+  pack_name,
+  instrument,
+  user_tags,
+  subtype,
+  genre
+);
+"#,
+),
+(
+    "011_search_vocab",
+    // Term list behind search suggestions: every token in the index with the
+    // number of rows containing it. Drives autocomplete, "did you mean" and
+    // the popular-term chips without a second bookkeeping table. Kept out of
+    // 010 so databases that already applied 010 still pick it up.
+    "CREATE VIRTUAL TABLE IF NOT EXISTS assets_vocab USING fts5vocab(assets_fts, row);",
+),
+(
+    "012_facet_partial_indexes",
+    // The facet counts run one GROUP BY per dimension, each filtered by
+    // `index_status != 'missing'`. The plain single-column indexes matched
+    // the GROUP BY but not that predicate, so every branch fell back to
+    // fetching all 164k table rows to re-check it. Partial indexes carrying
+    // the same predicate make each branch covering.
+    r#"
+CREATE INDEX IF NOT EXISTS idx_assets_live_instrument ON assets(instrument)   WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_assets_live_subtype    ON assets(subtype)      WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_assets_live_genre      ON assets(genre)        WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_assets_live_energy     ON assets(energy_level) WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_assets_live_texture    ON assets(texture)      WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_assets_live_space      ON assets(space)        WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_assets_live_role       ON assets(role)         WHERE index_status != 'missing';
+"#,
+),
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {

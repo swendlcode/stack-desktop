@@ -4,9 +4,9 @@ import { useFilterStore } from '../../stores/filterStore';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Input } from '../ui/Input';
-import { Setting2, SearchNormal, CloseCircle, Sun, Moon, ArrowUp2 } from '../ui/icons';
+import { Setting2, Sun, Moon, ArrowUp2, CloseCircle } from '../ui/icons';
 import { FolderPicker } from '../library/FolderPicker';
+import { SmartSearch } from '../browser/SmartSearch';
 import { useSearch } from '../../hooks/useSearch';
 import { useUpdateCheck } from '../../hooks/useUpdateCheck';
 import { settingsService } from '../../services/settingsService';
@@ -64,34 +64,15 @@ export function TitleBar() {
 
       {/* Search — centered */}
       <div className="z-10 flex justify-center pointer-events-none">
-        <Input
+        <SmartSearch
           id="global-search"
           className="no-drag pointer-events-auto w-[min(640px,52vw)]"
-          placeholder="Search samples, packs, instruments…"
           value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value);
+          onChange={(next) => {
+            setDraft(next);
             setPathPrefix(null);
             if (activePage !== 'browser') setActivePage('browser');
           }}
-          leading={
-            <SearchNormal size={15} color="var(--color-text-muted)" variant="Linear" />
-          }
-          trailing={
-            draft ? (
-              <button
-                onClick={() => {
-                  setDraft('');
-                  setPathPrefix(null);
-                  if (activePage !== 'browser') setActivePage('browser');
-                }}
-                aria-label="Clear search"
-                className="text-gray-400 hover:text-stack-white transition-colors"
-              >
-                <CloseCircle size={15} color="currentColor" variant="Linear" />
-              </button>
-            ) : null
-          }
         />
       </div>
 

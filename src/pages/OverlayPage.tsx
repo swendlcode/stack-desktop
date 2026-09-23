@@ -149,6 +149,7 @@ export function OverlayPage() {
         >
           <div className="no-drag">
             <BrowserToolbar
+          showSearch
               resultCount={totalCount}
               showPathChip={false}
               showTypeTabs

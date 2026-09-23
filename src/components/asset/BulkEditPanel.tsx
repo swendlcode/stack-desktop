@@ -8,6 +8,7 @@ import {
   HeartAdd,
   TickCircle,
 } from '../ui/icons';
+import { useShallow } from 'zustand/react/shallow';
 import { useSelectionStore } from '../../stores/selectionStore';
 import { assetService } from '../../services/assetService';
 import { assetQueryKeys } from '../../hooks/useAssets';
@@ -31,7 +32,12 @@ interface BulkEditPanelProps {
 }
 
 export function BulkEditPanel({ onClose }: BulkEditPanelProps) {
-  const { selectedIds, clearSelection } = useSelectionStore();
+  const { selectedIds, clearSelection } = useSelectionStore(
+    useShallow((s) => ({
+      selectedIds: s.selectedIds,
+      clearSelection: s.clearSelection,
+    })),
+  );
   const qc = useQueryClient();
 
   // Fetch the current page's assets the same way the grid does

@@ -1,5 +1,6 @@
 pub mod fuzzy_matcher;
 pub mod query_processor;
+pub mod suggestions;
 pub mod synonyms;
 
 pub use fuzzy_matcher::FuzzyMatcher;

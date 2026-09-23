@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAssets, PAGE_SIZE } from '../hooks/useAssets';
 import { AssetGrid } from '../components/asset/AssetGrid';
 import { AssetColumnHeader } from '../components/asset/AssetColumnHeader';
+import { NoResults } from '../components/browser/NoResults';
 import { BrowserToolbar } from '../components/browser/BrowserToolbar';
 import { ResultsHeader } from '../components/browser/ResultsHeader';
 import { FolderHero } from '../components/browser/FolderHero';
@@ -124,10 +125,5 @@ function EmptyState({ viewType }: { viewType: 'sample' | 'midi' | 'preset' | 'pr
           : viewType === 'project'
             ? 'project files'
             : 'files';
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-gray-500">
-      <div className="text-lg font-semibold text-gray-400">No {noun} found</div>
-      <div className="text-sm">Add a folder in Settings to start indexing.</div>
-    </div>
-  );
+  return <NoResults noun={noun} />;
 }

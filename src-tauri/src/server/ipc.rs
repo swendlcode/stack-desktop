@@ -54,6 +54,9 @@ pub async fn dispatch(app: AppHandle, cmd: &str, body: Value) -> Result<Value, S
         }
         "get_midi_notes" => to_val(ac::get_midi_notes(f!("id"), app.state()).await?),
         "get_facet_counts" => to_val(ac::get_facet_counts(f!("filters"), app.state()).await?),
+        "get_search_suggestions" => {
+            to_val(ac::get_search_suggestions(f!("query"), app.state()).await?)
+        }
         "find_similar" => to_val(ac::find_similar(f!("id"), f!("limit"), app.state()).await?),
 
         // ── library ─────────────────────────────────────────────────────────

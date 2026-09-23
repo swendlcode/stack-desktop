@@ -278,6 +278,18 @@ export function usePlayer() {
     return midiCtxRef.current;
   };
 
+  // One shared noise buffer for every hammer transient.
+  const noiseBufferRef = useRef<AudioBuffer | null>(null);
+  const getNoiseBuffer = (ctx: AudioContext) => {
+    if (!noiseBufferRef.current) {
+      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.12), ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      noiseBufferRef.current = buf;
+    }
+    return noiseBufferRef.current;
+  };
+
   const scheduleMidiNotes = async (
     notes: MidiNote[],
     durationSec: number,
@@ -290,11 +302,11 @@ export function usePlayer() {
     // Create a fresh master gain for this play session
     const master = ctx.createGain();
     // Keep significant headroom for dense MIDI chords.
-    master.gain.value = volumeRef.current * 0.42;
+    master.gain.value = volumeRef.current * 0.9;
     const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -18;
-    limiter.knee.value = 18;
-    limiter.ratio.value = 5;
+    limiter.threshold.value = -6;
+    limiter.knee.value = 12;
+    limiter.ratio.value = 3;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.12;
     master.connect(limiter);
@@ -320,60 +332,78 @@ export function usePlayer() {
       }
       activeEndTimes.push(entry.startSec + playDuration);
       const activeVoices = activeEndTimes.length;
-      const polyComp = 1 / Math.sqrt(Math.max(1, activeVoices));
+      // Chords should still sound like chords: compensate enough to avoid
+      // clipping, not so much that a four-note voicing halves in level.
+      const polyComp = Math.max(0.55, 1 / Math.pow(Math.max(1, activeVoices), 0.35));
 
-      // Main tone: slightly warm fundamental + gentle upper harmonics.
-      const oscA = ctx.createOscillator();
-      oscA.type = 'sine';
-      oscA.frequency.setValueAtTime(freq, startAt);
-      const oscB = ctx.createOscillator();
-      oscB.type = 'triangle';
-      oscB.frequency.setValueAtTime(freq * 2, startAt);
-      const oscC = ctx.createOscillator();
-      oscC.type = 'sine';
-      oscC.frequency.setValueAtTime(freq * 0.5, startAt);
-
-      const gainA = ctx.createGain();
-      const gainB = ctx.createGain();
-      const gainC = ctx.createGain();
-      gainA.gain.setValueAtTime(0.56 * polyComp, startAt);
-      gainB.gain.setValueAtTime(0.11 * polyComp, startAt);
-      gainC.gain.setValueAtTime(0.04 * polyComp, startAt);
-
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      const cutoff = Math.min(5600, 2100 + freq * 1.3);
-      filter.frequency.setValueAtTime(cutoff, startAt);
-      filter.Q.value = 0.45;
-      const body = ctx.createBiquadFilter();
-      body.type = 'peaking';
-      body.frequency.setValueAtTime(440, startAt);
-      body.Q.value = 0.7;
-      body.gain.setValueAtTime(2.0, startAt);
-
+      // Struck-string voice: a stack of harmonics whose upper partials fade
+      // faster than the fundamental, which is what makes a piano read as a
+      // piano rather than an organ. Slight inharmonicity (real strings are
+      // stiff, so partials sit progressively sharp) keeps chords from
+      // sounding synthetic.
       const env = ctx.createGain();
       env.gain.setValueAtTime(0.0001, startAt);
-      // Piano-ish envelope: quick but not clicky attack, natural decay + short release.
-      env.gain.exponentialRampToValueAtTime(0.48 * velocity, startAt + 0.014);
-      env.gain.exponentialRampToValueAtTime(0.24 * velocity, startAt + 0.12);
-      env.gain.exponentialRampToValueAtTime(0.09 * velocity, startAt + 0.40);
-      env.gain.exponentialRampToValueAtTime(0.0001, stopAt + 0.23);
+      env.gain.exponentialRampToValueAtTime(Math.max(0.05, 0.95 * velocity), startAt + 0.006);
+      env.gain.exponentialRampToValueAtTime(Math.max(0.03, 0.42 * velocity), startAt + 0.18);
+      env.gain.exponentialRampToValueAtTime(Math.max(0.015, 0.2 * velocity), startAt + 0.7);
+      env.gain.exponentialRampToValueAtTime(0.0001, stopAt + 0.3);
 
-      oscA.connect(gainA);
-      oscB.connect(gainB);
-      oscC.connect(gainC);
-      gainA.connect(filter);
-      gainB.connect(filter);
-      gainC.connect(filter);
-      filter.connect(body);
-      body.connect(env);
+      const tone = ctx.createBiquadFilter();
+      tone.type = 'lowpass';
+      tone.frequency.setValueAtTime(Math.min(11000, 3200 + freq * 3.2), startAt);
+      tone.Q.value = 0.3;
+      tone.connect(env);
       env.connect(master);
-      oscA.start(startAt);
-      oscB.start(startAt);
-      oscC.start(startAt);
-      oscA.stop(stopAt + 0.28);
-      oscB.stop(stopAt + 0.28);
-      oscC.stop(stopAt + 0.28);
+
+      const PARTIALS = [
+        { mult: 1, gain: 0.62, decay: 1.0 },
+        { mult: 2, gain: 0.26, decay: 0.62 },
+        { mult: 3, gain: 0.13, decay: 0.45 },
+        { mult: 4, gain: 0.08, decay: 0.32 },
+        { mult: 5, gain: 0.05, decay: 0.24 },
+        { mult: 6, gain: 0.03, decay: 0.18 },
+      ];
+      const inharmonicity = 0.0004;
+
+      for (const partial of PARTIALS) {
+        const pf = freq * partial.mult * (1 + inharmonicity * partial.mult * partial.mult);
+        if (pf > 16000) continue;
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(pf, startAt);
+        // A few cents of detune per partial gives the gentle beating of real strings.
+        osc.detune.setValueAtTime((partial.mult - 1) * 1.6, startAt);
+
+        const pg = ctx.createGain();
+        const peak = Math.max(0.0002, partial.gain * polyComp);
+        pg.gain.setValueAtTime(0.0001, startAt);
+        pg.gain.exponentialRampToValueAtTime(peak, startAt + 0.005);
+        // Upper partials die away first.
+        const partialEnd = startAt + Math.max(0.12, (stopAt - startAt + 0.3) * partial.decay);
+        pg.gain.exponentialRampToValueAtTime(0.0001, partialEnd);
+
+        osc.connect(pg);
+        pg.connect(tone);
+        osc.start(startAt);
+        osc.stop(stopAt + 0.32);
+      }
+
+      // Hammer strike: a very short filtered noise burst that supplies the
+      // transient the oscillator stack alone cannot.
+      const strike = ctx.createBufferSource();
+      strike.buffer = getNoiseBuffer(ctx);
+      const strikeFilter = ctx.createBiquadFilter();
+      strikeFilter.type = 'bandpass';
+      strikeFilter.frequency.setValueAtTime(Math.min(7000, freq * 4), startAt);
+      strikeFilter.Q.value = 0.8;
+      const strikeGain = ctx.createGain();
+      strikeGain.gain.setValueAtTime(0.14 * velocity * polyComp, startAt);
+      strikeGain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.055);
+      strike.connect(strikeFilter);
+      strikeFilter.connect(strikeGain);
+      strikeGain.connect(tone);
+      strike.start(startAt);
+      strike.stop(startAt + 0.1);
     }
     return true;
   };

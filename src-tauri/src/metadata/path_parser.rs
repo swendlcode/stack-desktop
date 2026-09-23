@@ -288,6 +288,12 @@ const SUBTYPE_MAP: &[(&str, &str)] = &[
     ("reese", "reese"),
 ];
 
+/// First genre in `GENRES` contained in `text` (already lowercased). The list
+/// is ordered longest-first, so "deep house" wins over "house".
+pub fn genre_from_text(text: &str) -> Option<String> {
+    GENRES.iter().find(|g| text.contains(**g)).map(|g| (*g).to_string())
+}
+
 pub fn parse(file_path: &Path, pack_root: &Path) -> PathMetadata {
     let mut meta = PathMetadata::default();
 
@@ -298,13 +304,17 @@ pub fn parse(file_path: &Path, pack_root: &Path) -> PathMetadata {
     meta.pack_name = pack_name.clone();
 
     if let Some(pn) = &pack_name {
-        let lower = pn.to_lowercase();
-        for g in GENRES {
-            if lower.contains(g) {
-                meta.genre = Some((*g).to_string());
-                break;
-            }
+        // Match the genre across the whole path *below* the pack root (pack
+        // name + subfolders + filename), not the pack name alone. Producers
+        // file by genre in subfolders at least as often as they buy a pack
+        // whose name states one, and matching only the pack name left the
+        // large majority of libraries with no genre at all.
+        let mut haystack = pn.to_lowercase();
+        if let Ok(rel) = file_path.strip_prefix(pack_root) {
+            haystack.push('/');
+            haystack.push_str(&rel.to_string_lossy().to_lowercase());
         }
+        meta.genre = genre_from_text(&haystack);
         // vendor heuristic: first word if pack name has multiple
         let tokens: Vec<&str> = pn.split_whitespace().collect();
         if tokens.len() >= 2 {

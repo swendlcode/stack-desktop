@@ -27,7 +27,7 @@ pub fn build_search(filters: &AssetFilters, sort: &SortOptions, limit: i64, offs
          instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
          meta, index_status, bpm_source, key_source, NULL AS waveform_data, \
          energy_level, texture, space, role, \
-         created_at, updated_at \
+         created_at, updated_at, genre \
          FROM assets WHERE 1=1{}",
         where_sql
     );
@@ -74,6 +74,7 @@ pub fn build_facet_counts(filters: &AssetFilters) -> AssetQuery {
     // Each branch needs the where-clause built with its own filter excluded.
     let (w_inst, p_inst) = build_where(&AssetFilters { instruments: vec![], ..filters.clone() });
     let (w_sub, p_sub) = build_where(&AssetFilters { subtypes: vec![], ..filters.clone() });
+    let (w_genre, p_genre) = build_where(&AssetFilters { genres: vec![], ..filters.clone() });
     let (w_energy, p_energy) = build_where(&AssetFilters { energy_levels: vec![], ..filters.clone() });
     let (w_texture, p_texture) = build_where(&AssetFilters { textures: vec![], ..filters.clone() });
     let (w_space, p_space) = build_where(&AssetFilters { spaces: vec![], ..filters.clone() });
@@ -86,6 +87,9 @@ pub fn build_facet_counts(filters: &AssetFilters) -> AssetQuery {
          SELECT 'subtype', subtype, COUNT(*) FROM assets \
          WHERE 1=1{} AND subtype IS NOT NULL AND subtype != '' GROUP BY subtype \
          UNION ALL \
+         SELECT 'genre', genre, COUNT(*) FROM assets \
+         WHERE 1=1{} AND genre IS NOT NULL AND genre != '' GROUP BY genre \
+         UNION ALL \
          SELECT 'energy', energy_level, COUNT(*) FROM assets \
          WHERE 1=1{} AND energy_level IS NOT NULL AND energy_level != '' GROUP BY energy_level \
          UNION ALL \
@@ -97,15 +101,22 @@ pub fn build_facet_counts(filters: &AssetFilters) -> AssetQuery {
          UNION ALL \
          SELECT 'role', role, COUNT(*) FROM assets \
          WHERE 1=1{} AND role IS NOT NULL AND role != '' GROUP BY role",
-        w_inst, w_sub, w_energy, w_texture, w_space, w_role
+        w_inst, w_sub, w_genre, w_energy, w_texture, w_space, w_role
     );
 
     // Concatenate params in the same order the WHERE clauses appear in the SQL.
     let mut params = Vec::with_capacity(
-        p_inst.len() + p_sub.len() + p_energy.len() + p_texture.len() + p_space.len() + p_role.len(),
+        p_inst.len()
+            + p_sub.len()
+            + p_genre.len()
+            + p_energy.len()
+            + p_texture.len()
+            + p_space.len()
+            + p_role.len(),
     );
     params.extend(p_inst);
     params.extend(p_sub);
+    params.extend(p_genre);
     params.extend(p_energy);
     params.extend(p_texture);
     params.extend(p_space);
@@ -238,6 +249,14 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
         }
     }
 
+    if !filters.genres.is_empty() {
+        let placeholders = vec!["?"; filters.genres.len()].join(",");
+        sql.push_str(&format!(" AND genre IN ({})", placeholders));
+        for g in &filters.genres {
+            params.push(Value::Text(g.clone()));
+        }
+    }
+
     if !filters.subtypes.is_empty() {
         let placeholders = vec!["?"; filters.subtypes.len()].join(",");
         sql.push_str(&format!(" AND subtype IN ({})", placeholders));
@@ -257,10 +276,20 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
     }
 
     if !filters.keys.is_empty() {
-        let placeholders = vec!["?"; filters.keys.len()].join(",");
-        sql.push_str(&format!(" AND key_note IN ({})", placeholders));
+        // Match enharmonic spellings too: a file tagged "Db" is the same note
+        // as one tagged "C#", and which spelling a pack uses is arbitrary.
+        let mut wanted: Vec<String> = Vec::new();
         for k in &filters.keys {
-            params.push(Value::Text(k.clone()));
+            for variant in enharmonic_variants(k) {
+                if !wanted.contains(&variant) {
+                    wanted.push(variant);
+                }
+            }
+        }
+        let placeholders = vec!["?"; wanted.len()].join(",");
+        sql.push_str(&format!(" AND key_note IN ({})", placeholders));
+        for k in wanted {
+            params.push(Value::Text(k));
         }
     }
 
@@ -277,8 +306,13 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
     }
 
     if let Some(prefix) = filters.path_prefix.as_ref().filter(|p| !p.is_empty()) {
-        sql.push_str(" AND path LIKE ?");
-        params.push(Value::Text(format!("{}%", prefix)));
+        // A range scan, not LIKE: SQLite's LIKE is case-insensitive by
+        // default, which disables the prefix optimisation and turns this into
+        // a full table scan. `idx_assets_path` is BINARY, so comparing
+        // against an upper bound uses the index instead.
+        sql.push_str(" AND path >= ? AND path < ?");
+        params.push(Value::Text(prefix.to_string()));
+        params.push(Value::Text(path_upper_bound(prefix)));
     }
 
     if !filters.energy_levels.is_empty() {
@@ -316,4 +350,37 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
     sql.push_str(" AND index_status != 'missing'");
 
     (sql, params)
+}
+
+/// Both spellings of an accidental note, so key filtering is independent of
+/// how a given pack happened to spell it. Naturals map to themselves.
+fn enharmonic_variants(key: &str) -> Vec<String> {
+    let pairs = [
+        ("C#", "Db"),
+        ("D#", "Eb"),
+        ("F#", "Gb"),
+        ("G#", "Ab"),
+        ("A#", "Bb"),
+    ];
+    for (sharp, flat) in pairs {
+        if key.eq_ignore_ascii_case(sharp) || key.eq_ignore_ascii_case(flat) {
+            return vec![sharp.to_string(), flat.to_string()];
+        }
+    }
+    vec![key.to_string()]
+}
+
+/// Exclusive upper bound for a path prefix range scan: the prefix with its
+/// last byte incremented, so everything starting with `prefix` sorts below it.
+pub fn path_upper_bound(prefix: &str) -> String {
+    let mut bytes = prefix.as_bytes().to_vec();
+    // Walk back over any 0xFF bytes, which cannot be incremented in place.
+    while let Some(last) = bytes.pop() {
+        if last < 0xFF {
+            bytes.push(last + 1);
+            return String::from_utf8_lossy(&bytes).into_owned();
+        }
+    }
+    // An all-0xFF prefix has no finite upper bound; fall back to the max char.
+    format!("{}\u{10FFFF}", prefix)
 }

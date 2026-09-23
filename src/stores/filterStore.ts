@@ -17,6 +17,9 @@ interface FilterStore {
   clearInstruments: () => void;
   toggleInstrument: (instrument: string) => void;
   toggleSubtype: (subtype: string) => void;
+  setSubtypes: (subtypes: string[]) => void;
+  toggleGenre: (genre: string) => void;
+  clearGenres: () => void;
   toggleFavoritesOnly: () => void;
   setPathPrefix: (prefix: string | null) => void;
   setSort: (sort: SortOptions) => void;
@@ -99,6 +102,11 @@ export const useFilterStore = create<FilterStore>((set) => ({
   clearScales: () => set((s) => ({ filters: { ...s.filters, scales: [] } })),
   clearInstruments: () => set((s) => ({ filters: { ...s.filters, instruments: [] } })),
 
+  toggleGenre: (genre) =>
+    set((s) => ({ filters: { ...s.filters, genres: toggle(s.filters.genres, genre) } })),
+
+  clearGenres: () => set((s) => ({ filters: { ...s.filters, genres: [] } })),
+
   toggleInstrument: (instrument) =>
     set((s) => ({
       filters: {
@@ -106,6 +114,8 @@ export const useFilterStore = create<FilterStore>((set) => ({
         instruments: toggle(s.filters.instruments, instrument),
       },
     })),
+
+  setSubtypes: (subtypes) => set((s) => ({ filters: { ...s.filters, subtypes } })),
 
   toggleSubtype: (subtype) =>
     set((s) => ({

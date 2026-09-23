@@ -265,6 +265,33 @@ pub fn run() {
         )
         .setup(|app| {
             let state = AppState::init(app.handle().clone())?;
+
+            // Migration 010 adds `genre` and rebuilds the search index with
+            // two extra columns, leaving it empty. Refill both from data we
+            // already have rather than forcing a re-read of every file.
+            {
+                let pool = state.db.clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let result = tauri::async_runtime::spawn_blocking(move || {
+                        if crate::core::genre_backfill::needs_rebuild(&pool)? {
+                            crate::core::genre_backfill::run(&pool).map(Some)
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(Some(_))) => {
+                            let _ = handle.emit("stack://reconcile-complete", ());
+                        }
+                        Ok(Err(e)) => tracing::warn!("genre backfill failed: {}", e),
+                        Err(e) => tracing::warn!("genre backfill panicked: {}", e),
+                        _ => {}
+                    }
+                });
+            }
+
             app.manage(state);
 
             // Expose the same UI + backend over localhost so it can be opened
@@ -338,6 +365,7 @@ pub fn run() {
             commands::asset_commands::get_waveform,
             commands::asset_commands::get_midi_notes,
             commands::asset_commands::get_facet_counts,
+            commands::asset_commands::get_search_suggestions,
             commands::asset_commands::find_similar,
             commands::pack_commands::get_packs,
             commands::pack_commands::get_pack,

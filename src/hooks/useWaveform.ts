@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { type RefObject, useEffect, useRef, useCallback } from 'react';
 import { assetService } from '../services/assetService';
 import { assetQueryKeys } from './useAssets';
+import { subscribeToTheme } from './useThemeEpoch';
 
 export function useWaveformData(id: string | null) {
   return useQuery({
@@ -140,18 +141,13 @@ export function useWaveformCanvas(
     // Repaint when the user toggles dark/light so colors flip with the rest
     // of the UI (no rerender of the parent is needed since data/progress are
     // unchanged but colors are read from CSS vars at draw time).
-    const themeObs = new MutationObserver(() => {
+    const unsubscribeTheme = subscribeToTheme(() => {
       drawWaveform(canvas, latestRef.current.data, latestRef.current.progress);
-    });
-    themeObs.observe(document.documentElement, {
-      attributes: true,
-      // 'style' covers inline accent overrides written by applyTheme().
-      attributeFilter: ['data-theme', 'style'],
     });
 
     return () => {
       ro.disconnect();
-      themeObs.disconnect();
+      unsubscribeTheme();
     };
   }, [canvasRef]);
 }

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useMemo, useState, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useShallow } from 'zustand/react/shallow';
 import { useQuery } from '@tanstack/react-query';
 import type { Asset, Settings } from '../../types';
 import { AssetRow } from './AssetRow';
@@ -75,7 +76,14 @@ export function AssetGrid({
   const prevEditorHeight = useRef(editorHeight);
 
   // Multi-select state
-  const { selectedIds, toggleId, selectRange, clearSelection } = useSelectionStore();
+  const { selectedIds, toggleId, selectRange, clearSelection } = useSelectionStore(
+    useShallow((s) => ({
+      selectedIds: s.selectedIds,
+      toggleId: s.toggleId,
+      selectRange: s.selectRange,
+      clearSelection: s.clearSelection,
+    })),
+  );
   // Track the last index clicked without modifier for Shift+click range anchor
   const lastClickedIndexRef = useRef<number | null>(null);
 
@@ -368,7 +376,6 @@ export function AssetGrid({
               <div
                 key={asset.id}
                 data-index={virtualRow.index}
-                ref={virtualizer.measureElement}
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -385,7 +392,8 @@ export function AssetGrid({
                   isLast={virtualRow.index === assets.length - 1}
                   viewType={viewType}
                   onOpenDetail={onOpenDetail}
-                  onRowClick={(e) => handleRowClick(virtualRow.index, e)}
+                  index={virtualRow.index}
+                  onRowClick={handleRowClick}
                   showWaveform={showWaveform}
                   showBpmBadge={showBpmBadge}
                   showKeyBadge={showKeyBadge}

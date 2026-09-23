@@ -1,3 +1,4 @@
+pub mod genre_backfill;
 pub mod hasher;
 pub mod indexer;
 pub mod plugins;

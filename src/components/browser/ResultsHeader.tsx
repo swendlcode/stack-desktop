@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useFilterStore } from '../../stores/filterStore';
 import { formatCount } from '../../utils/formatters';
-import { Refresh } from '../ui/icons';
+import { Shuffle, ArrowSwapVertical } from '../ui/icons';
 import type { SortField } from '../../types';
 
 const SORT_FIELDS: Array<{ field: SortField; label: string }> = [
@@ -97,11 +97,12 @@ function SortDropdown() {
       <button
         ref={triggerRef}
         onClick={toggle}
-        className="flex h-8 items-center gap-1.5 rounded-md border border-gray-600 bg-transparent px-3 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white"
+        className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-gray-600 bg-transparent pl-3 pr-2.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white"
         aria-expanded={open}
         aria-haspopup="true"
       >
-        {currentLabel} ▾
+        {currentLabel}
+        <ArrowSwapVertical size={13} color="currentColor" variant="Linear" />
       </button>
 
       {open && createPortal(
@@ -168,15 +169,14 @@ export function ResultsHeader({ resultCount }: ResultsHeaderProps) {
       </span>
 
       {/* Right: Sort dropdown */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <button
           onClick={handleShuffle}
-          className="flex h-8 items-center gap-1.5 rounded-md border border-gray-600 bg-transparent px-3 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white"
+          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-gray-600 bg-transparent text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white"
           aria-label="Shuffle results"
           title="Shuffle results"
         >
-          <Refresh size={13} color="currentColor" variant="Linear" />
-          Shuffle
+          <Shuffle size={14} color="currentColor" variant="Linear" />
         </button>
         <SortDropdown />
       </div>

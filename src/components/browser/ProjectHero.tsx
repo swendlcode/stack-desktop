@@ -42,6 +42,7 @@ export function ProjectHero({ pathPrefix }: Props) {
           packIds: [],
           instruments: [],
           subtypes: [],
+      genres: [],
           bpmMin: null,
           bpmMax: null,
           keys: [],

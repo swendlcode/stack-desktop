@@ -1,4 +1,21 @@
 {
+  "1.0.14": {
+    "date": "2026-09-22",
+    "title": "Smarter search, genre filtering & a much faster browser",
+    "summary": "Search now forgives typos and suggests what your library actually contains, genres are detected and filterable for the first time, and browsing a large library is dramatically faster.",
+    "highlights": [
+      "Search understands typos — look for \"vocalz\" or \"guitr\" and Stack finds vocals and guitars, using the real words in your own library.",
+      "Suggestions as you type, popular searches when the box is empty, and a helpful panel instead of a blank page when nothing matches.",
+      "New Genre filter — Stack detects genres from your folder structure, so house, future bass, techno and more are filterable out of the box.",
+      "Instruments and Genres are proper multi-select lists with live counts, and a filter box when the list is long.",
+      "New One-Shots & Loops filter.",
+      "Redesigned key picker with flat and sharp layouts — and keys now match regardless of whether a pack spells a note Db or C#.",
+      "One search bar instead of two: the browser toolbar duplicate is gone, and the main one no longer falls out of sync.",
+      "MIDI previews sound like a real instrument — richer, fuller and far louder, especially on chords. The piano roll now follows your theme and accent colour.",
+      "Filtering is around 10x faster, opening a folder is effectively instant, and scrolling long lists is much smoother.",
+      "Samples show a pointer cursor, and the shuffle and sort controls were tidied up."
+    ]
+  },
   "1.0.13": {
     "date": "2026-09-08",
     "title": "Compact view, custom columns & Intel Mac support",

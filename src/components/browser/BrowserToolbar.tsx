@@ -1,23 +1,23 @@
 import { useState, useMemo } from 'react';
-import { Input } from '../ui/Input';
 import {
   Dropdown,
   DropdownSection,
-  DropdownDivider,
   DropdownActions,
 } from '../ui/Dropdown';
 import { Slider } from '../ui/Slider';
 import {
-  SearchNormal,
   Heart,
   HeartAdd,
   CloseCircle,
 } from '../ui/icons';
 import { useSearch } from '../../hooks/useSearch';
+import { SmartSearch } from './SmartSearch';
+import { FacetDropdown } from './FacetDropdown';
+import { KeyPicker } from './KeyPicker';
+import { LoopTypeDropdown } from './LoopTypeDropdown';
 import { useFilterStore } from '../../stores/filterStore';
 import { useFacetCounts } from '../../hooks/useFacetCounts';
-import { CHROMATIC_KEYS } from '../../utils/keyUtils';
-import type { AssetType, KeyScale } from '../../types';
+import type { AssetType } from '../../types';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -37,39 +37,11 @@ const INSTRUMENT_LABELS: Record<string, string> = {
   brass: 'Brass', wind: 'Wind', vocal: 'Vocal', fx: 'FX',
 };
 
-const SCALES: Array<{ value: KeyScale; label: string }> = [
-  { value: 'major', label: 'Major' },
-  { value: 'minor', label: 'Minor' },
-];
-
 
 const BPM_MIN = 40;
 const BPM_MAX = 220;
 
 // ─── shared primitives ────────────────────────────────────────────────────────
-
-function Pill({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-        active
-          ? 'border-stack-fire bg-stack-fire/10 text-stack-fire'
-          : 'border-gray-600 bg-transparent text-gray-300 hover:border-gray-500 hover:bg-gray-800'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
 
 function NumInput({
   value,
@@ -267,7 +239,7 @@ function BpmDropdown() {
   );
 }
 
-// ─── Instrument dropdown — driven by live facet counts ───────────────────────
+// ─── Instrument + Genre — multi-select facet lists ───────────────────────────
 
 function InstrumentDropdown() {
   const instruments = useFilterStore((s) => s.filters.instruments);
@@ -275,137 +247,36 @@ function InstrumentDropdown() {
   const clearInstruments = useFilterStore((s) => s.clearInstruments);
   const { data: facets } = useFacetCounts();
 
-  const liveInstruments = useMemo(
-    () => (facets?.instruments ?? []).filter(
-      (f) => f.count > 0 || instruments.includes(f.value)
-    ),
-    [facets?.instruments, instruments],
-  );
-
-  const isActive = instruments.length > 0;
-  const label = isActive
-    ? instruments.length === 1
-      ? (INSTRUMENT_LABELS[instruments[0]] ?? instruments[0])
-      : `${instruments.length} instruments`
-    : 'Instrument';
-
   return (
-    <Dropdown label={label} active={isActive} minWidth={220}>
-      <div className="max-h-72 overflow-y-auto py-1">
-        {liveInstruments.length === 0 && (
-          <p className="px-4 py-3 text-sm text-gray-500">No instruments detected</p>
-        )}
-        {liveInstruments.map((f) => {
-          const active = instruments.includes(f.value);
-          const displayLabel = INSTRUMENT_LABELS[f.value] ?? (f.value.charAt(0).toUpperCase() + f.value.slice(1));
-          return (
-            <button
-              key={f.value}
-              onClick={() => toggleInstrument(f.value)}
-              className={`flex w-full items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                active
-                  ? 'bg-stack-fire/10 text-stack-fire'
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-stack-white'
-              }`}
-            >
-              <span className="flex-1 text-left">{displayLabel}</span>
-              <span className={`mono text-xs tabular-nums ${active ? 'text-stack-fire/70' : 'text-gray-600'}`}>
-                {f.count.toLocaleString()}
-              </span>
-              {active && (
-                <span className="h-2 w-2 rounded-full bg-stack-fire shrink-0" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-      {isActive && (
-        <>
-          <DropdownDivider />
-          <DropdownActions>
-            <button
-              onClick={clearInstruments}
-              className="rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-700 hover:text-stack-white transition-colors"
-            >
-              Clear
-            </button>
-          </DropdownActions>
-        </>
-      )}
-    </Dropdown>
+    <FacetDropdown
+      title="Instrument"
+      plural="instruments"
+      options={facets?.instruments ?? []}
+      selected={instruments}
+      onToggle={toggleInstrument}
+      onClear={clearInstruments}
+      labels={INSTRUMENT_LABELS}
+    />
   );
 }
 
-// ─── Key dropdown ──────────────────────────────────────────────────────────────
-
-function KeyDropdown() {
-  const keys = useFilterStore((s) => s.filters.keys);
-  const scales = useFilterStore((s) => s.filters.scales);
-  const toggleKey = useFilterStore((s) => s.toggleKey);
-  const toggleScale = useFilterStore((s) => s.toggleScale);
-  const clearKeys = useFilterStore((s) => s.clearKeys);
-  const clearScales = useFilterStore((s) => s.clearScales);
-  const isActive = keys.length > 0 || scales.length > 0;
-
-  const label = isActive
-    ? keys.length === 1 && scales.length === 1
-      ? `${keys[0]} ${scales[0]}`
-      : keys.length === 1
-      ? keys[0]
-      : `${keys.length} keys`
-    : 'Key';
+function GenreDropdown() {
+  const genres = useFilterStore((s) => s.filters.genres);
+  const toggleGenre = useFilterStore((s) => s.toggleGenre);
+  const clearGenres = useFilterStore((s) => s.clearGenres);
+  const { data: facets } = useFacetCounts();
 
   return (
-    <Dropdown label={label} active={isActive} minWidth={280}>
-      <DropdownSection title="Note">
-        <div className="grid grid-cols-6 gap-1.5">
-          {CHROMATIC_KEYS.map((k) => (
-            <button
-              key={k}
-              onClick={() => toggleKey(k)}
-              className={`mono rounded-lg py-2 text-sm font-medium transition-colors ${
-                keys.includes(k)
-                  ? 'bg-stack-fire text-stack-black'
-                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-              }`}
-            >
-              {k}
-            </button>
-          ))}
-        </div>
-      </DropdownSection>
-      <DropdownDivider />
-      <DropdownSection title="Scale">
-        <div className="flex gap-2">
-          {SCALES.map((s) => (
-            <Pill
-              key={s.value}
-              active={scales.includes(s.value)}
-              onClick={() => toggleScale(s.value)}
-            >
-              {s.label}
-            </Pill>
-          ))}
-        </div>
-      </DropdownSection>
-      {isActive && (
-        <>
-          <DropdownDivider />
-          <DropdownActions>
-            <button
-              onClick={() => { clearKeys(); clearScales(); }}
-              className="rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-700 hover:text-stack-white transition-colors"
-            >
-              Clear
-            </button>
-          </DropdownActions>
-        </>
-      )}
-    </Dropdown>
+    <FacetDropdown
+      title="Genre"
+      plural="genres"
+      options={facets?.genres ?? []}
+      selected={genres}
+      onToggle={toggleGenre}
+      onClear={clearGenres}
+    />
   );
 }
-
-
 
 // ─── Main toolbar ──────────────────────────────────────────────────────────────
 
@@ -417,6 +288,8 @@ export function BrowserToolbar({
   showKeyFilter = true,
   showBpmFilter = true,
   searchPlaceholder = 'Search samples, packs, instruments…',
+  showSearch = false,
+  showLoopTypeFilter = true,
 }: {
   resultCount: number;
   showFavoritesFilter?: boolean;
@@ -425,6 +298,10 @@ export function BrowserToolbar({
   showKeyFilter?: boolean;
   showBpmFilter?: boolean;
   searchPlaceholder?: string;
+  /** The overlay window has no title bar, so it needs its own search box. */
+  showSearch?: boolean;
+  /** One-Shots vs Loops — only meaningful for audio samples. */
+  showLoopTypeFilter?: boolean;
 }) {
   const [draft, setDraft] = useSearch();
   const filters = useFilterStore((s) => s.filters);
@@ -485,27 +362,22 @@ export function BrowserToolbar({
 
       {/* ── Row 2: Search + filter dropdowns ── */}
       <div className="flex items-center gap-2.5 px-6 py-2.5">
-        <Input
-          className="w-80"
-          placeholder={searchPlaceholder}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          leading={
-            <SearchNormal size={15} color="var(--color-text-muted)" variant="Linear" />
-          }
-          trailing={
-            draft ? (
-              <button onClick={() => setDraft('')} aria-label="Clear search">
-                <CloseCircle size={15} color="var(--color-text-muted)" variant="Linear" />
-              </button>
-            ) : null
-          }
-        />
-
-        <div className="h-5 w-px bg-gray-700" />
+        {showSearch && (
+          <>
+            <SmartSearch
+              className="w-80"
+              placeholder={searchPlaceholder}
+              value={draft}
+              onChange={setDraft}
+            />
+            <div className="h-5 w-px bg-gray-700" />
+          </>
+        )}
 
         <InstrumentDropdown />
-        {showKeyFilter && <KeyDropdown />}
+        <GenreDropdown />
+        {showLoopTypeFilter && <LoopTypeDropdown />}
+        {showKeyFilter && <KeyPicker />}
         {showBpmFilter && <BpmDropdown />}
 
         <div className="h-5 w-px bg-gray-700" />

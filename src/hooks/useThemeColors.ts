@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { subscribeToTheme } from './useThemeEpoch';
 import type { ThemeColors } from '../components/editor/waveformRender';
 import { darken, tripletToHex } from '../theme/color';
 import { DEFAULT_ACCENT } from '../theme/presets';
@@ -11,16 +12,7 @@ import { DEFAULT_ACCENT } from '../theme/presets';
 export function useThemeColors(): ThemeColors {
   const [colors, setColors] = useState<ThemeColors>(readColors);
 
-  useEffect(() => {
-    const apply = () => setColors(readColors());
-    const obs = new MutationObserver(apply);
-    obs.observe(document.documentElement, {
-      attributes: true,
-      // 'style' covers inline accent overrides written by applyTheme().
-      attributeFilter: ['data-theme', 'style'],
-    });
-    return () => obs.disconnect();
-  }, []);
+  useEffect(() => subscribeToTheme(() => setColors(readColors())), []);
 
   return colors;
 }

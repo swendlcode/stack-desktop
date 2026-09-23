@@ -33,6 +33,8 @@ export {
   Star,
   Filter,
   Sort,
+  Shuffle,
+  ArrowSwapVertical,
   More,
   CloseCircle,
   Refresh,

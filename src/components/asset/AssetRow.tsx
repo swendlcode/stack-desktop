@@ -38,9 +38,13 @@ import { useUiStore } from "../../stores/uiStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useStackDropZoneStore } from "../../stores/stackDropZoneStore";
 import { audioEngine } from "../../services/audioEngine";
-import type { MidiMeta, ProjectMeta } from "../../types";
+import type { MidiMeta, MidiNote, ProjectMeta } from "../../types";
 
 type ViewType = "sample" | "midi" | "preset" | "project" | "favorites";
+
+// Stable identity: `?? []` would allocate on every render and retrigger the
+// MidiViewer canvas redraw.
+const NO_NOTES: MidiNote[] = [];
 
 interface AssetRowProps {
   asset: Asset;
@@ -52,7 +56,9 @@ interface AssetRowProps {
   viewType?: ViewType;
   onPreview?: (asset: Asset) => void;
   onOpenDetail?: (asset: Asset) => void;
-  onRowClick?: (e: React.MouseEvent) => void;
+  /** Row position, passed back so the handler can stay reference-stable. */
+  index?: number;
+  onRowClick?: (index: number, e: React.MouseEvent) => void;
   showWaveform?: boolean;
   showBpmBadge?: boolean;
   showKeyBadge?: boolean;
@@ -70,6 +76,7 @@ export const AssetRow = memo(function AssetRow({
   viewType = "sample",
   onPreview,
   onOpenDetail,
+  index = 0,
   onRowClick,
   showWaveform = true,
   showBpmBadge = true,
@@ -101,18 +108,17 @@ export const AssetRow = memo(function AssetRow({
   const qc = useQueryClient();
   const setPathPrefix = useFilterStore((s) => s.setPathPrefix);
   const setActivePage = useUiStore((s) => s.setActivePage);
-  const detailAssetId = useUiStore((s) => s.detailAssetId);
+  const isDetailOpenForRow = useUiStore((s) => s.detailAssetId === asset.id);
   const toggleDetail = useUiStore((s) => s.toggleDetail);
-  const editorAssetId = useUiStore((s) => s.editorAssetId);
+  const isEditorOpen = useUiStore((s) => s.editorAssetId !== null);
   const openEditor = useUiStore((s) => s.openEditor);
-  const isDetailOpen = detailAssetId === asset.id;
+  const isDetailOpen = isDetailOpenForRow;
 
-  const { toggleId: toggleSelection } = useSelectionStore();
+  const toggleSelection = useSelectionStore((s) => s.toggleId);
   // Only subscribe to whether *any* selection is active (for hover checkbox hint)
   // — avoids re-rendering every row on each selection change.
   const hasAnySelection = useSelectionStore((s) => s.selectedIds.size > 0);
 
-  const [hovered, setHovered] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   const isActivePlaying = isActive && isPlaying;
@@ -135,7 +141,7 @@ export const AssetRow = memo(function AssetRow({
       if (!isPlaying) resume();
       return;
     }
-    const isEdited = editorAssetId !== null && asset.type === "sample";
+    const isEdited = isEditorOpen && asset.type === "sample";
     if (isEdited) {
       openEditor(asset.id);
     }
@@ -165,7 +171,7 @@ export const AssetRow = memo(function AssetRow({
   // Whole row is clickable: plain click auditions, modifier clicks only select.
   const lastRowClickRef = useRef(0);
   const handleRowClick = (e: React.MouseEvent) => {
-    onRowClick?.(e);
+    onRowClick?.(index, e);
     if (e.metaKey || e.ctrlKey || e.shiftKey || !canPlay) return;
     // Second click of a double-click: keep playing and let onDoubleClick open details.
     const now = performance.now();
@@ -357,6 +363,8 @@ export const AssetRow = memo(function AssetRow({
   return (
     <div
       className={`group flex items-center border-b border-gray-700/50 transition-colors ${
+        canPlay ? "cursor-pointer" : ""
+      } ${
         isLast ? "border-b-transparent" : ""
       } ${
         isMultiSelected
@@ -365,9 +373,7 @@ export const AssetRow = memo(function AssetRow({
             ? "bg-stack-fire/10"
             : isSelected
               ? "bg-gray-700/40"
-              : hovered
-                ? "bg-gray-800/70"
-                : ""
+              : "group-hover:bg-gray-800/70"
       }`}
       style={{ height: compact ? 40 : 64, paddingLeft: "12px", paddingRight: "12px" }}
       draggable
@@ -390,8 +396,6 @@ export const AssetRow = memo(function AssetRow({
             console.error("drag-out failed", err);
           });
       }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       onClick={handleRowClick}
       onDoubleClick={() => {
         if (asset.type === "project") {
@@ -447,9 +451,7 @@ export const AssetRow = memo(function AssetRow({
             className={`flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
               isActivePlaying
                 ? "text-stack-fire"
-                : hovered
-                  ? "text-stack-white"
-                  : "text-gray-400"
+                : "text-gray-400 group-hover:text-stack-white"
             }`}
             aria-label={isActivePlaying ? "Stop" : "Play"}
           >
@@ -466,7 +468,7 @@ export const AssetRow = memo(function AssetRow({
               openProjectTimeline();
             }}
             className={`flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
-              hovered ? "text-stack-fire" : "text-gray-400"
+              "text-gray-400 group-hover:text-stack-fire"
             }`}
             aria-label="Open project timeline"
             title="Open project timeline"
@@ -555,7 +557,7 @@ export const AssetRow = memo(function AssetRow({
                   />
                 ) : asset.type === "midi" ? (
                   <MidiViewer
-                    notes={(asset.meta as MidiMeta)?.pianoRoll ?? []}
+                    notes={(asset.meta as MidiMeta)?.pianoRoll ?? NO_NOTES}
                     height={compact ? 20 : 36}
                   />
                 ) : (

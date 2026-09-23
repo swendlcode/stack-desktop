@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::Result;
 use crate::metadata::audio_analyzer;
-use crate::models::{Asset, FacetCounts, MidiNote, SearchQuery, SearchResult};
+use crate::models::{Asset, FacetCounts, MidiNote, SearchQuery, SearchResult, SearchSuggestions};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -194,4 +194,15 @@ pub async fn find_similar(
     })
     .await
     .map_err(|e| crate::error::StackError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn get_search_suggestions(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<SearchSuggestions> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || crate::search::suggestions::suggest(&db, &query, 12))
+        .await
+        .map_err(|e| crate::error::StackError::Other(e.to_string()))?
 }

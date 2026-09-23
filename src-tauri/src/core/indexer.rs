@@ -480,6 +480,7 @@ impl Indexer {
         // Merge
         let instrument = fm.instrument.clone().or(pm.category.clone());
         let subtype = fm.subtype.clone().or(pm.subtype.clone());
+        let genre = pm.genre.clone();
 
         let bpm = fm.bpm;
         let key_note = fm.key_note.clone();
@@ -585,6 +586,7 @@ impl Indexer {
             channels,
             instrument: instrument.clone(),
             subtype: subtype.clone(),
+            genre: genre.clone(),
             is_favorite: false,
             user_tags: vec![],
             play_count: 0,

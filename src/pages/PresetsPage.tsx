@@ -58,6 +58,7 @@ export function PresetsPage() {
         showTypeTabs={false}
         showKeyFilter={false}
         showBpmFilter={false}
+        showLoopTypeFilter={false}
         searchPlaceholder="Search presets, synths, categories…"
       />
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">

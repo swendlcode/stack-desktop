@@ -72,6 +72,7 @@ impl AssetRepository {
 
         let mut instruments: Vec<FacetCount> = Vec::new();
         let mut subtypes: Vec<FacetCount> = Vec::new();
+        let mut genres: Vec<FacetCount> = Vec::new();
         let mut energy_levels: Vec<FacetCount> = Vec::new();
         let mut textures: Vec<FacetCount> = Vec::new();
         let mut spaces: Vec<FacetCount> = Vec::new();
@@ -89,6 +90,7 @@ impl AssetRepository {
             match facet.as_str() {
                 "instrument" => instruments.push(fc),
                 "subtype" => subtypes.push(fc),
+                "genre" => genres.push(fc),
                 "energy" => energy_levels.push(fc),
                 "texture" => textures.push(fc),
                 "space" => spaces.push(fc),
@@ -99,11 +101,19 @@ impl AssetRepository {
 
         // Each facet was previously ORDER BY cnt DESC inside its own query.
         // The UNION ALL drops that, so re-sort each bucket on the Rust side.
-        for v in [&mut instruments, &mut subtypes, &mut energy_levels, &mut textures, &mut spaces, &mut roles] {
+        for v in [
+            &mut instruments,
+            &mut subtypes,
+            &mut genres,
+            &mut energy_levels,
+            &mut textures,
+            &mut spaces,
+            &mut roles,
+        ] {
             v.sort_by_key(|c| std::cmp::Reverse(c.count));
         }
 
-        Ok(FacetCounts { instruments, subtypes, energy_levels, textures, spaces, roles })
+        Ok(FacetCounts { instruments, subtypes, genres, energy_levels, textures, spaces, roles })
     }
 
     pub fn search_raw(
@@ -130,7 +140,7 @@ impl AssetRepository {
              instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
              meta, index_status, bpm_source, key_source, waveform_data, \
              energy_level, texture, space, role, \
-             created_at, updated_at \
+             created_at, updated_at, genre \
              FROM assets WHERE id = ?1",
         )?;
         let mut rows = stmt.query([id])?;
@@ -168,11 +178,11 @@ impl AssetRepository {
             let mut upsert_stmt = tx.prepare_cached(
                 "INSERT INTO assets (id, path, filename, extension, type, pack_id, pack_name, \
                  bpm, key_note, key_scale, duration_ms, sample_rate, channels, \
-                 instrument, subtype, is_favorite, user_tags, play_count, meta, \
+                 instrument, subtype, genre, is_favorite, user_tags, play_count, meta, \
                  index_status, bpm_source, key_source, waveform_data, \
                  energy_level, texture, space, role, content_hash, \
                  created_at, updated_at, last_seen_at) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32) \
                  ON CONFLICT(path) DO UPDATE SET \
                     filename = excluded.filename, pack_id = excluded.pack_id, \
                     pack_name = excluded.pack_name, bpm = COALESCE(excluded.bpm, assets.bpm), \
@@ -183,6 +193,7 @@ impl AssetRepository {
                     channels = COALESCE(excluded.channels, assets.channels), \
                     instrument = COALESCE(excluded.instrument, assets.instrument), \
                     subtype = COALESCE(excluded.subtype, assets.subtype), \
+                    genre = COALESCE(excluded.genre, assets.genre), \
                     meta = excluded.meta, index_status = excluded.index_status, \
                     bpm_source = COALESCE(excluded.bpm_source, assets.bpm_source), \
                     key_source = COALESCE(excluded.key_source, assets.key_source), \
@@ -203,6 +214,7 @@ impl AssetRepository {
                     channels = COALESCE(excluded.channels, assets.channels), \
                     instrument = COALESCE(excluded.instrument, assets.instrument), \
                     subtype = COALESCE(excluded.subtype, assets.subtype), \
+                    genre = COALESCE(excluded.genre, assets.genre), \
                     meta = excluded.meta, index_status = excluded.index_status, \
                     bpm_source = COALESCE(excluded.bpm_source, assets.bpm_source), \
                     key_source = COALESCE(excluded.key_source, assets.key_source), \
@@ -217,8 +229,8 @@ impl AssetRepository {
             let mut row_id_stmt = tx.prepare_cached("SELECT id FROM assets WHERE path = ?1")?;
             let mut fts_del_stmt = tx.prepare_cached("DELETE FROM assets_fts WHERE id = ?1")?;
             let mut fts_ins_stmt = tx.prepare_cached(
-                "INSERT INTO assets_fts (id, filename, pack_name, instrument, user_tags) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO assets_fts (id, filename, pack_name, instrument, user_tags, subtype, genre) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
 
             for (asset, content_hash) in items {
@@ -253,6 +265,7 @@ impl AssetRepository {
                     asset.channels,
                     asset.instrument,
                     asset.subtype,
+                    asset.genre,
                     asset.is_favorite as i64,
                     tags,
                     asset.play_count,
@@ -281,7 +294,15 @@ impl AssetRepository {
                     None => asset.id.clone(),
                 };
                 fts_ins_stmt
-                    .execute(params![row_id, asset.filename, asset.pack_name, asset.instrument, tags])
+                    .execute(params![
+                        row_id,
+                        asset.filename,
+                        asset.pack_name,
+                        asset.instrument,
+                        tags,
+                        asset.subtype,
+                        asset.genre
+                    ])
                     .ok();
             }
         }
@@ -652,10 +673,11 @@ impl AssetRepository {
 
     pub fn count_under_path(&self, prefix: &str) -> Result<i64> {
         let conn = self.db.get()?;
-        let pattern = format!("{}%", prefix);
+        // Range scan rather than LIKE so `idx_assets_path` is usable.
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM assets WHERE path LIKE ?1 AND index_status != 'missing'",
-            [&pattern],
+            "SELECT COUNT(*) FROM assets \
+             WHERE path >= ?1 AND path < ?2 AND index_status != 'missing'",
+            [prefix, &query_builder::path_upper_bound(prefix)],
             |r| r.get(0),
         )?;
         Ok(count)
@@ -732,7 +754,7 @@ impl AssetRepository {
              instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
              meta, index_status, bpm_source, key_source, NULL AS waveform_data, \
              energy_level, texture, space, role, \
-             created_at, updated_at, \
+             created_at, updated_at, genre, \
              ({}) AS _score \
              FROM assets WHERE {} \
              ORDER BY _score DESC LIMIT ?",
@@ -744,7 +766,7 @@ impl AssetRepository {
         let mut stmt = conn.prepare(&sql)?;
         let assets = stmt
             .query_map(params_from_iter(params.iter()), |row| {
-                // row_to_asset reads columns 0..31; column 32 is _score (ignored)
+                // row_to_asset reads columns 0..32; column 33 is _score (ignored)
                 row_to_asset(row)
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -760,7 +782,7 @@ impl AssetRepository {
              instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
              meta, index_status, bpm_source, key_source, NULL AS waveform_data, \
              energy_level, texture, space, role, \
-             created_at, updated_at \
+             created_at, updated_at, genre \
              FROM assets WHERE pack_id = ?1 ORDER BY filename COLLATE NOCASE LIMIT ?2 OFFSET ?3",
         )?;
         let assets = stmt
@@ -777,7 +799,7 @@ impl AssetRepository {
              a.instrument, a.subtype, a.is_favorite, a.user_tags, a.play_count, a.last_played, a.rating, \
              a.meta, a.index_status, a.bpm_source, a.key_source, NULL AS waveform_data, \
              a.energy_level, a.texture, a.space, a.role, \
-             a.created_at, a.updated_at \
+             a.created_at, a.updated_at, a.genre \
              FROM assets a JOIN stack_assets sa ON sa.asset_id = a.id \
              WHERE sa.stack_id = ?1 ORDER BY sa.position ASC LIMIT ?2 OFFSET ?3",
         )?;
@@ -818,6 +840,7 @@ fn row_to_asset(row: &Row) -> rusqlite::Result<Asset> {
         channels: row.get(12).ok(),
         instrument: row.get(14).ok(),
         subtype: row.get(15).ok(),
+        genre: row.get(32).ok(),
         is_favorite: is_fav != 0,
         user_tags,
         play_count: row.get(18).unwrap_or(0),

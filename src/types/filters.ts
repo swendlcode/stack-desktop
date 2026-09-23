@@ -6,6 +6,7 @@ export interface AssetFilters {
   packIds: string[];
   instruments: string[];
   subtypes: string[];
+  genres: string[];
   bpmMin: number | null;
   bpmMax: number | null;
   keys: string[];
@@ -34,6 +35,7 @@ export const DEFAULT_FILTERS: AssetFilters = {
   packIds: [],
   instruments: [],
   subtypes: [],
+  genres: [],
   bpmMin: null,
   bpmMax: null,
   keys: [],

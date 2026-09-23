@@ -21,6 +21,7 @@ pub struct Asset {
 
     pub instrument: Option<String>,
     pub subtype: Option<String>,
+    pub genre: Option<String>,
 
     pub is_favorite: bool,
     pub user_tags: Vec<String>,
@@ -73,6 +74,8 @@ pub struct AssetFilters {
     pub instruments: Vec<String>,
     #[serde(default)]
     pub subtypes: Vec<String>,
+    #[serde(default)]
+    pub genres: Vec<String>,
     pub bpm_min: Option<f32>,
     pub bpm_max: Option<f32>,
     #[serde(default)]
@@ -141,8 +144,19 @@ pub struct FacetCount {
 pub struct FacetCounts {
     pub instruments: Vec<FacetCount>,
     pub subtypes: Vec<FacetCount>,
+    pub genres: Vec<FacetCount>,
     pub energy_levels: Vec<FacetCount>,
     pub textures: Vec<FacetCount>,
     pub spaces: Vec<FacetCount>,
     pub roles: Vec<FacetCount>,
+}
+
+/// Suggestions shown around the search box: prefix completions, typo
+/// corrections, and the library's most common terms.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchSuggestions {
+    pub completions: Vec<String>,
+    pub corrections: Vec<String>,
+    pub popular: Vec<String>,
 }

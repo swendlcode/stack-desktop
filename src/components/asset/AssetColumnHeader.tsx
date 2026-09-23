@@ -5,6 +5,7 @@
  * that toggles column visibility and row density (persisted in Settings).
  */
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useSelectionStore } from '../../stores/selectionStore';
 import { useColumnPrefs } from '../../hooks/useColumnPrefs';
 import { Checkbox } from '../ui/Checkbox';
@@ -35,7 +36,13 @@ export function AssetColumnHeader({
   showFolderColumn?: boolean;
   compact?: boolean;
 }) {
-  const { selectedIds, setSelection, clearSelection } = useSelectionStore();
+  const { selectedIds, setSelection, clearSelection } = useSelectionStore(
+    useShallow((s) => ({
+      selectedIds: s.selectedIds,
+      setSelection: s.setSelection,
+      clearSelection: s.clearSelection,
+    })),
+  );
   const { settings, toggle } = useColumnPrefs();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 

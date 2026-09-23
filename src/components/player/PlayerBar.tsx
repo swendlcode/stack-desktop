@@ -18,6 +18,23 @@ import { formatKey, formatBpm } from "../../utils/formatters";
 import { audioEngine } from "../../services/audioEngine";
 import { assetService } from "../../services/assetService";
 
+/**
+ * The progress line is the only thing in the bar that depends on playback
+ * position, which updates 20x a second. Isolating it here keeps that tick
+ * from re-rendering the artwork, metadata and volume controls.
+ */
+function PlayerProgress() {
+  const progress = usePlayerStore((s) =>
+    s.duration > 0 ? Math.min(1, Math.max(0, s.currentTime / s.duration)) : 0,
+  );
+  return (
+    <div
+      className="pointer-events-none absolute left-0 top-0 h-px bg-stack-fire transition-[width] duration-150"
+      style={{ width: `${progress * 100}%` }}
+    />
+  );
+}
+
 export function PlayerBar() {
   usePlayer();
 
@@ -27,8 +44,6 @@ export function PlayerBar() {
   const stop = usePlayerStore((s) => s.stop);
   const playlist = usePlayerStore((s) => s.playlist);
   const setPlaylist = usePlayerStore((s) => s.setPlaylist);
-  const currentTime = usePlayerStore((s) => s.currentTime);
-  const duration = usePlayerStore((s) => s.duration);
   const openEditor = useUiStore((s) => s.openEditor);
   const editorOpen = useUiStore((s) => s.editorAssetId !== null);
 
@@ -269,8 +284,6 @@ export function PlayerBar() {
   // Show different text when in editor mode
   const playerDisplayName =
     editorOpen && currentAsset ? `${displayName} (editing)` : displayName;
-  const progress =
-    duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
 
   return (
     <div className="relative flex h-16 shrink-0 items-center border-t border-gray-700 bg-gray-900 px-4 gap-4">
@@ -285,10 +298,7 @@ export function PlayerBar() {
         />
       )}
 
-      <div
-        className="pointer-events-none absolute left-0 top-0 h-px bg-stack-fire transition-[width] duration-150"
-        style={{ width: `${progress * 100}%` }}
-      />
+      <PlayerProgress />
 
       {/* ── LEFT: Prev / Play / Next ── */}
       {!editorOpen && (
