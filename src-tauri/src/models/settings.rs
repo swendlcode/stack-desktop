@@ -4,6 +4,13 @@ fn default_true() -> bool {
     true
 }
 
+/// Port the embedded HTTP server (browser access) listens on.
+pub const DEFAULT_WEB_ACCESS_PORT: u16 = 9870;
+
+fn default_web_access_port() -> u16 {
+    DEFAULT_WEB_ACCESS_PORT
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -58,6 +65,18 @@ pub struct Settings {
     /// Show the folder-path column on asset rows
     #[serde(default)]
     pub show_folder_column: bool,
+
+    // ── Web access ────────────────────────────────────────────────────────
+    /// Serve the same UI over HTTP while the desktop app runs.
+    #[serde(default = "default_true")]
+    pub web_access_enabled: bool,
+    /// Bind `0.0.0.0` instead of `127.0.0.1`, making the library reachable
+    /// from other devices on the local network. Forces token auth on.
+    #[serde(default)]
+    pub web_access_lan: bool,
+    /// Port the embedded HTTP server listens on.
+    #[serde(default = "default_web_access_port")]
+    pub web_access_port: u16,
 }
 
 impl Default for Settings {
@@ -82,6 +101,9 @@ impl Default for Settings {
             compact_list: false,
             show_time_badge: true,
             show_folder_column: false,
+            web_access_enabled: true,
+            web_access_lan: false,
+            web_access_port: DEFAULT_WEB_ACCESS_PORT,
         }
     }
 }

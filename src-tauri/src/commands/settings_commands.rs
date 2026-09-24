@@ -2,7 +2,8 @@ use tauri::State;
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::error::Result;
-use crate::models::Settings;
+use crate::models::{Settings, WebAccessInfo};
+use crate::server::{self, WebConfig};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -46,6 +47,13 @@ pub async fn update_settings(
         }
     }
 
+    // Web access — restart the embedded HTTP server on any change to where,
+    // or whether, it listens. Takes effect immediately; no relaunch needed.
+    let web = WebConfig::from_settings(&settings);
+    if web != WebConfig::from_settings(&prev) {
+        server::apply(app.clone(), web);
+    }
+
     // Launch at startup — sync with OS
     if settings.launch_at_startup != prev.launch_at_startup {
         let autostart = app.autolaunch();
@@ -70,4 +78,11 @@ pub async fn sync_autostart(
     state.settings.write().launch_at_startup = enabled;
     state.save_settings();
     Ok(enabled)
+}
+
+/// Reachable URLs (token included) plus the live state of the embedded server.
+#[tauri::command]
+pub async fn get_web_access_info(state: State<'_, AppState>) -> Result<WebAccessInfo> {
+    let settings = state.settings.read().clone();
+    Ok(server::access_info(WebConfig::from_settings(&settings)))
 }

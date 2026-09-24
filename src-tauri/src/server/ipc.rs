@@ -110,6 +110,7 @@ pub async fn dispatch(app: AppHandle, cmd: &str, body: Value) -> Result<Value, S
             to_val(sc::update_settings(f!("settings"), app.clone(), app.state()).await?)
         }
         "sync_autostart" => to_val(sc::sync_autostart(app.clone(), app.state()).await?),
+        "get_web_access_info" => to_val(sc::get_web_access_info(app.state()).await?),
 
         // ── plugins / project / misc ────────────────────────────────────────
         "scan_plugins" => to_val(plg::scan_plugins(f!("formats"), f!("extraPaths")).await?),

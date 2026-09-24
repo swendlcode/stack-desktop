@@ -1,4 +1,17 @@
 {
+  "1.0.17": {
+    "date": "2026-09-24",
+    "title": "Browse your library from any device",
+    "summary": "Open Stack in a browser on your phone, tablet or another computer on the same network — with a new Web access section in Settings that gives you the exact link to use.",
+    "highlights": [
+      "New Web access section in Settings: turn browsing on or off, pick the port, and copy the link.",
+      "Optionally allow other devices on your network, so you can browse and audition your library from a phone, tablet or laptop.",
+      "Links are protected by an access token, so only someone with your link can reach your library. Opening the link once is enough — the browser remembers it.",
+      "The link for other devices shows your computer's network address, so there is no guessing at IP addresses.",
+      "Turning network access on or off applies immediately, without restarting Stack.",
+      "README now explains browser access, and answers the Docker question: Stack is a desktop app and cannot run in a container, but browser access covers the same use case."
+    ]
+  },
   "1.0.16": {
     "date": "2026-09-24",
     "title": "Artwork fixes — and Stack stops touching your folders",

@@ -6,7 +6,7 @@
 // Desktop: real Tauri event bus. Browser: a single Server-Sent Events stream
 // (`/__events`) that the desktop process bridges every `stack://…` emit onto.
 import { event } from '@tauri-apps/api';
-import { isTauri } from './tauri-core';
+import { bridgeUrl, isTauri } from './tauri-core';
 
 type BridgedEvent<T> = { event: string; payload: T; id: number };
 
@@ -15,7 +15,8 @@ const handlers = new Map<string, Set<(e: BridgedEvent<unknown>) => void>>();
 
 function ensureSource(): void {
   if (source || isTauri) return;
-  source = new EventSource('/__events');
+  // EventSource cannot set headers, so the token rides in the query string.
+  source = new EventSource(bridgeUrl('/__events'), { withCredentials: true });
   source.onmessage = (msg) => {
     try {
       const data = JSON.parse(msg.data) as { event: string; payload: unknown };

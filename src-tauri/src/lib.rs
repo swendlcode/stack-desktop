@@ -8,9 +8,6 @@ pub mod search;
 pub mod server;
 pub mod state;
 
-/// Port the embedded HTTP server (browser access) listens on.
-const WEB_SERVER_PORT: u16 = 9870;
-
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, CheckMenuItem, Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
@@ -318,9 +315,20 @@ pub fn run() {
 
             app.manage(state);
 
-            // Expose the same UI + backend over localhost so it can be opened
-            // in any browser while the desktop app is running.
-            crate::server::start(app.handle().clone(), WEB_SERVER_PORT);
+            // Expose the same UI + backend over HTTP so it can be opened in
+            // any browser while the desktop app is running. Loopback-only
+            // unless the user opts into LAN access, which forces token auth.
+            {
+                let cfg = {
+                    let state = app.state::<AppState>();
+                    let settings = state.settings.read();
+                    crate::server::WebConfig::from_settings(&settings)
+                };
+                if let Ok(dir) = app.path().app_data_dir() {
+                    crate::server::init_token(&dir);
+                }
+                crate::server::apply(app.handle().clone(), cfg);
+            }
 
             // Register global overlay shortcut. We register both variants explicitly
             // to approximate "CmdOrCtrl+Shift+O" across platforms.
@@ -417,6 +425,7 @@ pub fn run() {
             commands::settings_commands::get_settings,
             commands::settings_commands::update_settings,
             commands::settings_commands::sync_autostart,
+            commands::settings_commands::get_web_access_info,
             commands::plugin_commands::scan_plugins,
             commands::plugin_commands::find_plugin_leftovers,
             commands::plugin_commands::delete_plugin,

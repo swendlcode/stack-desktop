@@ -34,4 +34,25 @@ export interface Settings {
   compactList: boolean;
   showTimeBadge: boolean;
   showFolderColumn: boolean;
+  // Web access
+  /** Serve the same UI over HTTP while the desktop app runs. */
+  webAccessEnabled: boolean;
+  /** Bind 0.0.0.0 instead of 127.0.0.1. Forces token auth on. */
+  webAccessLan: boolean;
+  webAccessPort: number;
+}
+
+/** Live state of the embedded HTTP server, plus ready-to-open URLs. */
+export interface WebAccessInfo {
+  enabled: boolean;
+  lan: boolean;
+  port: number;
+  /** Port actually bound right now; null when the bind failed. */
+  boundPort: number | null;
+  running: boolean;
+  /** Required on every request while `lan` is on. */
+  token: string;
+  localUrl: string;
+  lanUrl: string | null;
+  lanIp: string | null;
 }

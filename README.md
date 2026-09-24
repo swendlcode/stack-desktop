@@ -36,6 +36,7 @@ xattr -rd com.apple.quarantine /Applications/Stack.app
 - BPM/key filtering and full-text search
 - Audio waveform and MIDI preview
 - Folder-based browser with pack organization
+- Browse your library from a phone or another computer on the same network
 - Auto-update flow via GitHub Releases
 
 ## Tech Stack
@@ -88,6 +89,50 @@ git push origin v1.0.0
 src/              React + TypeScript frontend
 src-tauri/src/    Rust backend (commands, core, db, metadata, models)
 ```
+
+## Browser & Network Access
+
+Stack runs a small HTTP server while the desktop app is open, serving the *same*
+UI from the *same* database. Open it in Chrome or Safari on this machine, or on
+your phone, and you are looking at the same library — nothing is uploaded
+anywhere.
+
+Set it up in **Settings › Web access**:
+
+1. **Serve Stack in a browser** — on by default. Binds `127.0.0.1` only.
+2. **Allow other devices on this network** — off by default. Binds `0.0.0.0` so
+   phones, tablets and other machines on the same Wi-Fi can reach it.
+3. Copy the URL shown for **Other devices** and open it on the phone.
+
+Both toggles and the port take effect immediately; the app does not need a
+restart.
+
+### Authentication
+
+A random token is generated on first run and kept in the app data directory, so
+the URL stays valid across launches. The URLs shown in Settings already include
+it as `?token=…`.
+
+- While Stack is bound to loopback only, local requests need no token.
+- The moment **Allow other devices** is on, **every** request to `/__ipc`,
+  `/__media` and `/__events` must present the token — as `?token=`, an
+  `Authorization: Bearer …` header, or the `stack_token` cookie the server sets
+  the first time a page is opened with a valid token. Anything else gets a 401.
+
+The token is the only thing standing between your network and your library, and
+the bridge exposes the full command set (including folder removal and plugin
+deletion). Treat the link like a password, use it on networks you trust, and
+leave LAN access off when you don't need it.
+
+### Can I run Stack in Docker?
+
+No, and there is no Stack Docker image. Stack is a desktop application: the Rust
+backend and the native webview are one process, and the webview needs a display
+server. There is nothing to run headless in a container.
+
+What the network access above gives you is the same practical result for most
+people — run the desktop app on the machine that holds your samples, turn on
+**Allow other devices**, and use any browser on your network as the client.
 
 ## First Run
 

@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { libraryService } from '../services/libraryService';
 import { settingsService } from '../services/settingsService';
 import { audioEngine } from '../services/audioEngine';
 import { usePlayerStore } from '../stores/playerStore';
-import { isTauri } from '../lib/tauri-core';
 import { Button } from '../components/ui/Button';
 import {
   Trash,
@@ -16,19 +14,12 @@ import {
   VolumeMute,
   ArrowDown2,
   HeartAdd,
-  Global,
-  Copy,
-  CopySuccess,
 } from '../components/ui/icons';
 
-// URL the embedded HTTP server serves the UI on. In dev the bundled assets
-// aren't available on the server port, so point at the Vite dev server (which
-// proxies IPC to the backend); in production the server serves the bundle.
-const WEB_UI_URL = import.meta.env.DEV
-  ? 'http://localhost:1420'
-  : 'http://localhost:9870';
 import { Slider } from '../components/ui/Slider';
 import { ThemeSettings } from '../components/settings/ThemeSettings';
+import { SettingRow, SettingSection, Toggle } from '../components/settings/primitives';
+import { WebAccessSettings } from '../components/settings/WebAccessSettings';
 import { PluginFolderSettings } from '../components/settings/PluginFolderSettings';
 import { packQueryKeys } from '../hooks/usePacks';
 import { assetQueryKeys } from '../hooks/useAssets';
@@ -46,62 +37,6 @@ function formatBytes(bytes: number): string {
 }
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
-
-function SettingSection({ title, description, children }: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mb-8">
-      <div className="mb-4 border-b border-gray-700/60 pb-3">
-        <h3 className="text-sm font-semibold uppercase tracking-widest text-gray-400">{title}</h3>
-        {description && <p className="mt-1 text-xs text-gray-600">{description}</p>}
-      </div>
-      <div className="space-y-1">{children}</div>
-    </section>
-  );
-}
-
-function SettingRow({ label, description, children }: {
-  label: string;
-  description?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-6 rounded-lg px-3 py-3 hover:bg-gray-800/50 transition-colors">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-stack-white">{label}</p>
-        {description && <p className="mt-0.5 text-xs text-gray-500">{description}</p>}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function Toggle({ checked, onChange, disabled }: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 ${
-        checked ? 'bg-stack-fire' : 'bg-gray-600'
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </button>
-  );
-}
 
 function Select({ value, options, onChange }: {
   value: string | number;
@@ -349,67 +284,6 @@ function AudioDiagnostics() {
   );
 }
 
-// ─── Web access ────────────────────────────────────────────────────────────────
-// Opens the same UI in the user's default browser. While the desktop app runs it
-// exposes the identical backend + library on localhost, so the browser tab shares
-// the same database and samples — it's the same Stack, just in a browser.
-
-function WebAccessSettings() {
-  const [copied, setCopied] = useState(false);
-
-  const open = () => {
-    // Desktop: hand the URL to the OS so it opens in the real browser.
-    // Browser tab: it's already in a browser — just open another tab.
-    if (isTauri) openUrl(WEB_UI_URL).catch(() => {});
-    else window.open(WEB_UI_URL, '_blank', 'noopener');
-  };
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(WEB_UI_URL);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* clipboard unavailable */ }
-  };
-
-  return (
-    <SettingSection
-      title="Web access"
-      description="Open Stack in your browser. While the app is running it shares the same backend, database and samples — nothing is uploaded."
-    >
-      <SettingRow
-        label="Open in browser"
-        description={
-          <>Same UI at <span className="mono text-gray-400">{WEB_UI_URL}</span>. Works in Chrome, Safari or any browser on this machine.</>
-        }
-      >
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={
-              copied
-                ? <CopySuccess size={14} variant="Linear" color="currentColor" />
-                : <Copy size={14} variant="Linear" color="currentColor" />
-            }
-            onClick={copy}
-          >
-            {copied ? 'Copied' : 'Copy link'}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<Global size={14} variant="Linear" color="currentColor" />}
-            onClick={open}
-          >
-            Open in browser
-          </Button>
-        </div>
-      </SettingRow>
-    </SettingSection>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SETTINGS: Settings = {
@@ -432,6 +306,9 @@ const DEFAULT_SETTINGS: Settings = {
   compactList: false,
   showTimeBadge: true,
   showFolderColumn: false,
+  webAccessEnabled: true,
+  webAccessLan: false,
+  webAccessPort: 9870,
 };
 
 export function SettingsPage() {
@@ -574,7 +451,7 @@ export function SettingsPage() {
         </SettingSection>
 
         {/* ── Web access ── */}
-        <WebAccessSettings />
+        <WebAccessSettings settings={settings} onChange={updateAndSave} />
 
         {/* ── Playback ── */}
         <SettingSection
