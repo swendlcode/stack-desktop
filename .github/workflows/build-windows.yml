@@ -38,7 +38,7 @@ jobs:
           # artifacts, so it has no use for signed update bundles. Turning
           # them off keeps the signing key scoped to the release workflow —
           # otherwise the declared pubkey makes every build demand it.
-          args: --config tauri.smoke.conf.json
+          args: --config src-tauri/tauri.smoke.conf.json
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
