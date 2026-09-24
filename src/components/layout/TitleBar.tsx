@@ -1,14 +1,12 @@
-import { useState } from 'react';
 import { useUiStore } from '../../stores/uiStore';
 import { useFilterStore } from '../../stores/filterStore';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Setting2, Sun, Moon, ArrowUp2, CloseCircle } from '../ui/icons';
+import { Setting2, Sun, Moon } from '../ui/icons';
 import { FolderPicker } from '../library/FolderPicker';
+import { UpdateBadge } from './UpdateBadge';
 import { SmartSearch } from '../browser/SmartSearch';
 import { useSearch } from '../../hooks/useSearch';
-import { useUpdateCheck } from '../../hooks/useUpdateCheck';
 import { settingsService } from '../../services/settingsService';
 import { applyTheme, patchCachedSettings } from '../../hooks/useTheme';
 import type { Settings } from '../../types';
@@ -16,8 +14,6 @@ import type { Settings } from '../../types';
 export function TitleBar() {
   const activePage = useUiStore((s) => s.activePage);
   const setActivePage = useUiStore((s) => s.setActivePage);
-  const updateVersion = useUpdateCheck();
-  const [updateDismissed, setUpdateDismissed] = useState(false);
   const setPathPrefix = useFilterStore((s) => s.setPathPrefix);
   const [draft, setDraft] = useSearch();
   const qc = useQueryClient();
@@ -79,25 +75,7 @@ export function TitleBar() {
       {/* Add folder + Theme + Settings — right */}
       <div className="z-10 flex items-center justify-end pointer-events-none">
         <div className="no-drag pointer-events-auto flex items-center gap-3">
-          {updateVersion && !updateDismissed && (
-            <div className="flex items-center gap-1 rounded-md border border-stack-fire/30 bg-stack-fire/10 pl-2 pr-1 py-1">
-              <button
-                onClick={() => openUrl('https://stack.swendl.com')}
-                className="flex items-center gap-1 text-xs font-medium text-stack-fire hover:text-stack-fire/80 transition-colors"
-                title={`Stack v${updateVersion} is available — download at stack.swendl.com`}
-              >
-                <ArrowUp2 size={11} color="currentColor" variant="Bold" />
-                v{updateVersion}
-              </button>
-              <button
-                onClick={() => setUpdateDismissed(true)}
-                className="ml-0.5 text-stack-fire/60 hover:text-stack-fire transition-colors"
-                aria-label="Dismiss update"
-              >
-                <CloseCircle size={13} color="currentColor" variant="Linear" />
-              </button>
-            </div>
-          )}
+          <UpdateBadge />
           <FolderPicker />
           <button
             onClick={toggleTheme}

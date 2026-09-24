@@ -18,6 +18,10 @@ export const isTauri =
 // is desktop-only; the browser fallback never exercises those plugins.
 export const Channel = core.Channel;
 
+// Same reasoning for `Resource`, which @tauri-apps/plugin-updater extends for
+// its Update handle. Desktop-only: the browser fallback never runs the updater.
+export const Resource = core.Resource;
+
 async function httpInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const res = await fetch(`/__ipc/${cmd}`, {
     method: 'POST',

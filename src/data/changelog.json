@@ -1,4 +1,14 @@
 {
+  "1.0.15": {
+    "date": "2026-09-24",
+    "title": "Updates inside the app & a playback fix",
+    "summary": "Stack now updates itself — no more trips to the website — and audio no longer goes silent after the app has been sitting in the background.",
+    "highlights": [
+      "Updates install from inside Stack: it downloads in the background while you keep working, then applies on a single Restart click.",
+      "This is the last version you will need to download by hand. From here on, updates arrive in the app automatically.",
+      "Fixed audio going silent after Stack had been open in the background for a long time — macOS was interrupting the audio engine and it never recovered. It now reconnects on its own when you come back to the app."
+    ]
+  },
   "1.0.14": {
     "date": "2026-09-22",
     "title": "Smarter search, genre filtering & a much faster browser",

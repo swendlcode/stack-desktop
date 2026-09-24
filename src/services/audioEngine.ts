@@ -80,6 +80,15 @@ function writePref(key: string, value: string | number | null): void {
 }
 
 type SinkCapableContext = AudioContext & { setSinkId?: (id: string) => Promise<void> };
+
+/**
+ * True only when the context will actually produce sound. WebKit adds an
+ * 'interrupted' state that the DOM `AudioContextState` union doesn't list,
+ * so compare as a plain string rather than against the union.
+ */
+function isRunning(ctx: AudioContext): boolean {
+  return (ctx.state as string) === 'running';
+}
 type SinkCapableMediaEl = HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
 
 /** Native AudioContext output routing (Chromium). WebKit lacks this. */
@@ -113,6 +122,7 @@ type CacheEntry = {
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
+  private stateWatcherBound = false;
   private currentSource: AudioBufferSourceNode | null = null;
   private gainNode: GainNode | null = null;
   private cache = new Map<string, CacheEntry>();
@@ -172,11 +182,12 @@ class AudioEngine {
         userActivationActive: userActivationActive(),
       });
       await this.wireOutput();
+      this.watchContextState();
     }
-    if (this.ctx.state === 'suspended') {
+    if (!isRunning(this.ctx)) {
       try {
         await this.ctx.resume();
-        alog('ctx:resume', { stateAfterResume: this.ctx.state });
+        alog('ctx:resume', { from: this.ctx.state, stateAfterResume: this.ctx.state });
       } catch {
         // If resume fails the context is unusable — recreate it next call
         alog('ctx:resume-failed');
@@ -187,9 +198,44 @@ class AudioEngine {
     return this.ctx;
   }
 
+  /**
+   * Keep the context alive across interruptions. macOS can interrupt or
+   * suspend an idle context while the user is in another app; without this
+   * the next play attempt is silent until the app is restarted.
+   */
+  private watchContextState() {
+    const ctx = this.ctx;
+    if (!ctx || this.stateWatcherBound) return;
+    this.stateWatcherBound = true;
+
+    const tryResume = () => {
+      const current = this.ctx;
+      if (!current || current.state === 'closed' || isRunning(current)) return;
+      current.resume().catch(() => {
+        alog('ctx:auto-resume-failed', { ctxState: current.state });
+      });
+    };
+
+    ctx.addEventListener('statechange', () => {
+      alog('ctx:statechange', { ctxState: ctx.state });
+      tryResume();
+    });
+    // Coming back to the app is the moment before the user hits play.
+    window.addEventListener('focus', tryResume);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) tryResume();
+    });
+  }
+
   /** Synchronous accessor — only safe after getCtxAsync() has been awaited once. */
   private getCtxSync(): AudioContext | null {
-    if (!this.ctx || this.ctx.state === 'closed' || this.ctx.state === 'suspended') {
+    // Anything other than 'running' means sources would start silently. In
+    // particular WebKit has an 'interrupted' state (system audio interruption,
+    // or the app sitting in the background for a long stretch) that is absent
+    // from the DOM type union: treating it as usable produced a source that
+    // reported success and played nothing, and because the engine then looked
+    // "active", usePlayer trusted it and never fell back to HTML audio.
+    if (!this.ctx || !isRunning(this.ctx)) {
       return null;
     }
     return this.ctx;
