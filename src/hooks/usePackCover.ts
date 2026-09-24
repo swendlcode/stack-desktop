@@ -16,7 +16,12 @@ export function usePackCover(packRoot: string | null) {
       if (!packRoot) return null;
       const path = await packService.getPackCover(packRoot);
       if (!path) return null;
-      return `${convertFileSrc(path)}?v=${Date.now()}`;
+      // Overwriting cover.png keeps the same URL, so bust the cache — but the
+      // browser-mode transport already returns a query string ("/__media?path=…"),
+      // and blindly appending "?v=" produced a second '?' that folded the buster
+      // into the path parameter and 404'd every cover.
+      const base = convertFileSrc(path);
+      return `${base}${base.includes('?') ? '&' : '?'}v=${Date.now()}`;
     },
     enabled: Boolean(packRoot),
     staleTime: Infinity,

@@ -63,8 +63,9 @@ pub struct PackMeta {
 
 /// Return the absolute path of the pack's cover image, in priority order:
 ///   1. user-set artwork under `<root>/.stack/cover.{ext}`
-///   2. legacy top-level names (folder.jpg / cover.jpg / artwork.png ...)
-///   3. nested locations producers commonly use (Cover/Cover.jpg,
+///   2. a macOS custom folder icon, exported to `.stack/finder-icon.png`
+///   3. legacy top-level names (folder.jpg / cover.jpg / artwork.png ...)
+///   4. nested locations producers commonly use (Cover/Cover.jpg,
 ///      Cover/1x1/Cover.png, Artwork/Artwork.png, ...). Case-insensitive.
 /// Returns `None` if no image exists.
 #[tauri::command]
@@ -72,6 +73,16 @@ pub async fn get_pack_cover(pack_root: String) -> Result<Option<String>> {
     let root = PathBuf::from(&pack_root);
     if let Some(user) = find_user_cover(&root) {
         return Ok(Some(user.to_string_lossy().to_string()));
+    }
+    // A macOS custom folder icon only exists because somebody deliberately set
+    // one in Get Info, which makes it a stronger signal than guessing at a
+    // `folder.jpg` or walking into a `Cover/` subdirectory — so it outranks
+    // both, and only user artwork under `.stack/` beats it.
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(finder) = export_macos_finder_icon(&root) {
+            return Ok(Some(finder.to_string_lossy().to_string()));
+        }
     }
     for name in LEGACY_COVER_NAMES {
         let candidate = root.join(name);
@@ -82,13 +93,34 @@ pub async fn get_pack_cover(pack_root: String) -> Result<Option<String>> {
     if let Some(nested) = find_nested_cover(&root) {
         return Ok(Some(nested.to_string_lossy().to_string()));
     }
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(finder) = export_macos_finder_icon(&root) {
-            return Ok(Some(finder.to_string_lossy().to_string()));
-        }
+    // Nothing of its own: show the nearest ancestor's artwork, so browsing
+    // into a pack's subfolders still shows the pack's cover. This used to be
+    // done by copying the image into every descendant's `.stack/` and
+    // stamping each folder's Finder icon, which duplicated the file dozens of
+    // times (61MB from one 2.3MB image in a real project) and overwrote icons
+    // the user had set themselves.
+    if let Some(inherited) = find_inherited_cover(&root) {
+        return Ok(Some(inherited.to_string_lossy().to_string()));
     }
     Ok(None)
+}
+
+/// Nearest ancestor's user-set artwork. Bounded so a stray path can't walk to
+/// the filesystem root, and stops at the user's home directory.
+fn find_inherited_cover(root: &Path) -> Option<PathBuf> {
+    const MAX_HOPS: usize = 12;
+    let home = std::env::var("HOME").ok().map(PathBuf::from);
+    let mut current = root.parent()?;
+    for _ in 0..MAX_HOPS {
+        if home.as_deref() == Some(current) || current.parent().is_none() {
+            return None;
+        }
+        if let Some(found) = find_user_cover(current) {
+            return Some(found);
+        }
+        current = current.parent()?;
+    }
+    None
 }
 
 /// Subfolder names (case-insensitive) where producers often stack a cover.
@@ -219,69 +251,7 @@ pub async fn set_pack_artwork(
         }
     }
 
-    // Propagate the cover to every descendant folder — so applying artwork
-    // to a top-level pack automatically distributes it down to the last
-    // leaf. Descendants that already have their own `.stack/cover.*` are
-    // left alone so a user-customized child isn't overwritten.
-    if let Err(e) = propagate_cover_to_descendants(&root, ext, &bytes) {
-        tracing::warn!("failed to propagate cover to descendants: {}", e);
-    }
-
     Ok(target.to_string_lossy().to_string())
-}
-
-/// Walks every subdirectory under `root` and writes the same cover bytes
-/// into each descendant's `.stack/cover.<ext>`, overwriting any existing
-/// cover on those descendants so the newly uploaded artwork always wins.
-/// Skips:
-///   - the root itself (already written above)
-///   - any directory whose name starts with '.' (hidden / .stack)
-///
-/// On macOS each descendant also gets the Finder icon applied.
-fn propagate_cover_to_descendants(
-    root: &Path,
-    ext: &'static str,
-    bytes: &[u8],
-) -> std::io::Result<()> {
-    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let entries = match fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(ft) = entry.file_type() else { continue };
-            if !ft.is_dir() { continue; }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-            // Skip hidden / internal dirs (including our own `.stack`).
-            if name.starts_with('.') { continue; }
-
-            // Always overwrite — the parent upload takes precedence.
-            write_child_cover(&path, ext, bytes);
-            stack.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn write_child_cover(child: &Path, ext: &'static str, bytes: &[u8]) {
-    let dir = stack_dir(child);
-    if fs::create_dir_all(&dir).is_err() { return; }
-    // Clear any stale alternate-extension covers so only one exists.
-    for other in ARTWORK_EXTS {
-        let p = dir.join(format!("cover.{}", other));
-        if p.exists() { let _ = fs::remove_file(p); }
-    }
-    let target = dir.join(format!("cover.{}", ext));
-    if fs::write(&target, bytes).is_err() { return; }
-
-    #[cfg(target_os = "macos")]
-    {
-        if let Err(e) = apply_macos_folder_icon(child, Some(&target)) {
-            tracing::warn!("propagate: macOS folder icon failed for {}: {}", child.display(), e);
-        }
-    }
 }
 
 /// Remove any user-set `.stack/cover.*`. Leaves legacy top-level covers alone.
@@ -290,6 +260,12 @@ fn write_child_cover(child: &Path, ext: &'static str, bytes: &[u8]) {
 pub async fn clear_pack_artwork(pack_root: String) -> Result<()> {
     let root = PathBuf::from(&pack_root);
     let dir = stack_dir(&root);
+
+    // Whether Stack was the one that put artwork here. `set_pack_artwork`
+    // writes `.stack/cover.*` and mirrors it onto the folder icon, so that
+    // file is the marker for "this folder icon is ours to remove".
+    let had_stack_cover = find_user_cover(&root).is_some();
+
     if dir.exists() {
         for ext in ARTWORK_EXTS {
             let p = dir.join(format!("cover.{}", ext));
@@ -297,14 +273,28 @@ pub async fn clear_pack_artwork(pack_root: String) -> Result<()> {
                 let _ = fs::remove_file(p);
             }
         }
+        // Drop our cached export of the Finder icon; the icon itself is
+        // handled separately below.
+        let finder = dir.join("finder-icon.png");
+        if finder.exists() {
+            let _ = fs::remove_file(finder);
+        }
     }
 
     #[cfg(target_os = "macos")]
     {
-        if let Err(e) = apply_macos_folder_icon(&root, None) {
-            tracing::warn!("failed to clear macOS folder icon: {}", e);
+        // Only reset the folder icon when Stack set it. A custom icon the user
+        // applied themselves in Get Info is their data, not ours to delete —
+        // clearing it unconditionally destroyed work done outside the app.
+        if had_stack_cover {
+            if let Err(e) = apply_macos_folder_icon(&root, None) {
+                tracing::warn!("failed to clear macOS folder icon: {}", e);
+            }
         }
     }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = had_stack_cover;
 
     Ok(())
 }

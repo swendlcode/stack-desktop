@@ -294,6 +294,28 @@ pub fn run() {
                 });
             }
 
+            // One-time repair of the cover-propagation bug: remove artwork
+            // copies that were pushed into descendant folders, and the Finder
+            // icons stamped alongside them.
+            {
+                let pool = state.db.clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let data_dir = match handle.path().app_data_dir() {
+                        Ok(d) => d,
+                        Err(_) => return,
+                    };
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        if crate::core::artwork_cleanup::needs_cleanup(&data_dir) {
+                            if let Err(e) = crate::core::artwork_cleanup::run(&pool, &data_dir) {
+                                tracing::warn!("artwork cleanup failed: {}", e);
+                            }
+                        }
+                    })
+                    .await;
+                });
+            }
+
             app.manage(state);
 
             // Expose the same UI + backend over localhost so it can be opened

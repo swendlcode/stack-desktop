@@ -1,4 +1,17 @@
 {
+  "1.0.16": {
+    "date": "2026-09-24",
+    "title": "Artwork fixes — and Stack stops touching your folders",
+    "summary": "Covers show up again, your macOS folder icons are used as artwork, and Stack no longer rewrites the icons of every subfolder inside a pack.",
+    "highlights": [
+      "Fixed pack and project covers showing as a broken image.",
+      "Stack no longer changes the Finder icon of every subfolder inside a pack. Setting one cover used to copy the image into every folder below it and rebrand each one — in one project that was 27 copies of the same image, 61MB, across 64 folders.",
+      "Subfolders still show their pack's artwork, but nothing is written into them any more.",
+      "A one-time cleanup runs on this update: it removes those duplicate copies and restores the folder icons Stack changed, keeping the cover you actually chose.",
+      "If you set a custom folder icon in macOS Get Info, Stack now uses it as that pack's artwork.",
+      "Removing artwork no longer deletes a folder icon you set yourself — it only clears the one Stack applied."
+    ]
+  },
   "1.0.15": {
     "date": "2026-09-24",
     "title": "Updates inside the app & a playback fix",
