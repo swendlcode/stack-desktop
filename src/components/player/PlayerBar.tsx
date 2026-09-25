@@ -42,6 +42,7 @@ export function PlayerBar() {
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const resume = usePlayerStore((s) => s.resume);
   const stop = usePlayerStore((s) => s.stop);
+  const clearCurrent = usePlayerStore((s) => s.clearCurrent);
   const playlist = usePlayerStore((s) => s.playlist);
   const setPlaylist = usePlayerStore((s) => s.setPlaylist);
   const openEditor = useUiStore((s) => s.openEditor);
@@ -58,22 +59,18 @@ export function PlayerBar() {
         // Check if the current asset still exists in the database
         const exists = await assetService.assetExists(currentAsset.id);
         if (!exists) {
-          // Asset was deleted - stop playback and clear current asset
-          console.log("Current asset no longer exists, stopping playback");
-          stop();
+          // Genuinely gone from disk — drop it rather than leaving a dead
+          // track in the player bar.
+          clearCurrent();
         }
-      } catch (error) {
-        // If we can't validate, assume it's gone and stop playback
-        console.warn(
-          "Failed to validate current asset, stopping playback:",
-          error,
-        );
-        stop();
+      } catch {
+        // A failed lookup is not evidence the file is gone — a dropped IPC
+        // call should never interrupt what the user is listening to.
       }
     };
 
     validateAsset();
-  }, [currentAsset, stop]);
+  }, [currentAsset, clearCurrent]);
 
   // Listen for library changes that might affect the current playlist
   useEffect(() => {
@@ -84,10 +81,7 @@ export function PlayerBar() {
           .assetExists(currentAsset.id)
           .catch(() => false);
         if (!exists) {
-          console.log(
-            "Current asset no longer exists after library change, stopping playback",
-          );
-          stop();
+          clearCurrent();
         }
       }
     };
@@ -125,7 +119,7 @@ export function PlayerBar() {
         unsubscribeFns.forEach((fn) => fn());
       });
     };
-  }, [currentAsset, stop, setPlaylist]);
+  }, [currentAsset, clearCurrent, setPlaylist]);
 
   const disabled = !currentAsset;
   const canEdit = currentAsset?.type === "sample";

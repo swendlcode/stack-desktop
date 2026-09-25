@@ -1,4 +1,13 @@
 {
+  "1.0.21": {
+    "date": "2026-09-25",
+    "title": "Playback keeps going while you browse",
+    "summary": "A playing sample no longer stops when you search, open another pack, or switch tabs.",
+    "highlights": [
+      "Audition a sample and keep browsing — searching, changing pack or switching tabs no longer cuts it off.",
+      "A dropped connection while checking a file no longer stops what you are listening to."
+    ]
+  },
   "1.0.20": {
     "date": "2026-09-25",
     "title": "Built for phones",
