@@ -97,7 +97,7 @@ function SortDropdown() {
       <button
         ref={triggerRef}
         onClick={toggle}
-        className="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-gray-600 bg-transparent pl-3 pr-2.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white"
+        className="flex h-10 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg border border-gray-600 bg-transparent pl-3 pr-2.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white md:h-8"
         aria-expanded={open}
         aria-haspopup="true"
       >
@@ -161,7 +161,7 @@ export function ResultsHeader({ resultCount }: ResultsHeaderProps) {
   };
 
   return (
-    <div className="flex items-center justify-between px-6 py-3 border-b border-gray-700/50 bg-gray-900/50">
+    <div className="flex items-center justify-between gap-2 border-b border-gray-700/50 bg-gray-900/50 px-3 py-2 sm:px-6 sm:py-3">
       {/* Left: Result count */}
       <span className="mono text-sm text-gray-500 whitespace-nowrap">
         {formatCount(resultCount)}{' '}
@@ -172,7 +172,7 @@ export function ResultsHeader({ resultCount }: ResultsHeaderProps) {
       <div className="flex items-center gap-2">
         <button
           onClick={handleShuffle}
-          className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-gray-600 bg-transparent text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white"
+          className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-gray-600 bg-transparent text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white md:h-8 md:w-8"
           aria-label="Shuffle results"
           title="Shuffle results"
         >

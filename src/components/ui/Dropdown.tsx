@@ -103,7 +103,9 @@ export function Dropdown({
       <button
         ref={triggerRef}
         onClick={toggle}
-        className={`flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors ${
+        // 40px tall below `md` so the trigger is thumb-sized; the desktop
+        // 32px chip is untouched from `md` up.
+        className={`flex h-10 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 text-xs font-medium transition-colors md:h-8 ${
           active || open
             ? 'border-stack-fire bg-stack-fire/10 text-stack-fire'
             : 'border-gray-600 bg-transparent text-gray-300 hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white'
@@ -127,7 +129,13 @@ export function Dropdown({
         createPortal(
           <div
             ref={panelRef}
-            style={{ top: pos.top, left: pos.left, minWidth }}
+            style={{
+              top: pos.top,
+              left: pos.left,
+              minWidth,
+              // Never let a panel wider than the phone push the page sideways.
+              maxWidth: 'calc(100vw - 16px)',
+            }}
             className="fixed z-50 rounded-xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/40"
           >
             {children}

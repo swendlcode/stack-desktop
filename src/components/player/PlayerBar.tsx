@@ -281,32 +281,43 @@ export function PlayerBar() {
       : currentAsset.filename
     : "Nothing playing";
 
+  const keyText = currentAsset?.keyNote
+    ? formatKey(currentAsset.keyNote, currentAsset.keyScale)
+    : null;
+  const bpmText =
+    currentAsset?.bpm != null ? `${formatBpm(currentAsset.bpm)} BPM` : null;
+
   // Show different text when in editor mode
   const playerDisplayName =
     editorOpen && currentAsset ? `${displayName} (editing)` : displayName;
 
   return (
-    <div className="relative flex h-16 shrink-0 items-center border-t border-gray-700 bg-gray-900 px-4 gap-4">
+    <div className="relative flex h-16 shrink-0 items-center gap-3 border-t border-gray-700 bg-gray-900 px-3 md:gap-4 md:px-4">
       <div className="pointer-events-none absolute left-0 right-0 top-0 h-px bg-gray-700" />
 
       {/* ── DRAG HANDLE TO OPEN EDITOR ── */}
       {!editorOpen && canEdit && (
         <div
           onMouseDown={onMouseDown}
-          className="absolute left-0 right-0 top-0 z-10 h-1.5 -translate-y-1/2 cursor-row-resize transition-colors hover:bg-stack-fire/40 active:bg-stack-fire/60"
+          className="absolute left-0 right-0 top-0 z-10 hidden h-1.5 -translate-y-1/2 cursor-row-resize transition-colors hover:bg-stack-fire/40 active:bg-stack-fire/60 md:block"
           title="Drag up to open Editor"
         />
       )}
 
       <PlayerProgress />
 
-      {/* ── LEFT: Prev / Play / Next ── */}
+      {/* ── LEFT: Prev / Play / Next ──
+          On a phone the transport moves to the right of the metadata
+          (`order-2`) and shrinks to the one control that matters: play/pause.
+          Prev/next and the editor button are desktop-only — the editor needs
+          a mouse drag anyway, and skipping is a rare action next to
+          previewing whatever was just tapped in the list. */}
       {!editorOpen && (
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="order-2 flex shrink-0 items-center gap-1 md:order-none">
           <button
             onClick={handlePlayPrev}
             disabled={disabled || !hasPrev}
-            className="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:text-stack-white transition-colors disabled:opacity-25 disabled:cursor-not-allowed"
+            className="hidden h-8 w-8 items-center justify-center rounded text-gray-400 transition-colors hover:text-stack-white disabled:cursor-not-allowed disabled:opacity-25 md:flex"
             aria-label="Previous"
           >
             <Previous size={16} color="currentColor" variant="Linear" />
@@ -315,10 +326,10 @@ export function PlayerBar() {
           <button
             onClick={() => (isPlaying ? stop() : resume())}
             disabled={disabled}
-            className={`flex h-8 w-8 items-center justify-center rounded transition-colors disabled:opacity-30 ${
+            className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors disabled:opacity-30 md:h-8 md:w-8 md:rounded ${
               isPlaying
-                ? "text-stack-fire"
-                : "text-gray-400 hover:text-stack-white"
+                ? "bg-stack-fire/15 text-stack-fire md:bg-transparent"
+                : "bg-gray-800 text-gray-300 hover:text-stack-white md:bg-transparent md:text-gray-400"
             }`}
             aria-label={isPlaying ? "Stop" : "Play"}
           >
@@ -332,7 +343,7 @@ export function PlayerBar() {
           <button
             onClick={handlePlayNext}
             disabled={disabled || !hasNext}
-            className="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:text-stack-white transition-colors disabled:opacity-25 disabled:cursor-not-allowed"
+            className="hidden h-8 w-8 items-center justify-center rounded text-gray-400 transition-colors hover:text-stack-white disabled:cursor-not-allowed disabled:opacity-25 md:flex"
             aria-label="Next"
           >
             <Next size={16} color="currentColor" variant="Linear" />
@@ -343,7 +354,7 @@ export function PlayerBar() {
               if (currentAsset) openEditor(currentAsset.id);
             }}
             disabled={!canEdit}
-            className={`ml-1 flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${editorOpen ? "bg-stack-fire/15 text-stack-fire" : canEdit ? "text-gray-300 hover:bg-gray-800 hover:text-stack-white" : "text-gray-600"}`}
+            className={`ml-1 hidden h-8 items-center gap-1.5 rounded px-2.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed md:flex ${editorOpen ? "bg-stack-fire/15 text-stack-fire" : canEdit ? "text-gray-300 hover:bg-gray-800 hover:text-stack-white" : "text-gray-600"}`}
             aria-label="Edit sample"
             title={
               canEdit
@@ -362,7 +373,7 @@ export function PlayerBar() {
       )}
 
       {/* ── CENTRE-LEFT: Artwork + name + type ── */}
-      <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div className="order-1 flex min-w-0 flex-1 items-center gap-3 md:order-none">
         <div className="shrink-0">
           <PackCover
             packRoot={packRoot}
@@ -375,17 +386,27 @@ export function PlayerBar() {
           <span className="truncate text-sm font-medium text-stack-white leading-tight">
             {playerDisplayName}
           </span>
-          {typeLabel && (
-            <span className="truncate text-xs text-gray-500 leading-tight capitalize">
-              {editorOpen ? "Sample Editor" : typeLabel}
-            </span>
-          )}
+          <span className="flex min-w-0 items-center gap-1.5 truncate text-xs leading-tight text-gray-500">
+            {typeLabel && (
+              <span className="truncate capitalize">
+                {editorOpen ? "Sample Editor" : typeLabel}
+              </span>
+            )}
+            {/* The stacked Key/BPM readout below is too wide for a phone, so
+                key and tempo fold into this subtitle instead of vanishing. */}
+            {currentAsset && (keyText || bpmText) && (
+              <span className="mono shrink-0 text-gray-400 md:hidden">
+                {typeLabel ? "· " : ""}
+                {[keyText, bpmText].filter(Boolean).join(" · ")}
+              </span>
+            )}
+          </span>
         </div>
       </div>
 
       {/* ── CENTRE: Key | BPM ── */}
       {currentAsset && (
-        <div className="flex items-center gap-px shrink-0">
+        <div className="hidden shrink-0 items-center gap-px md:flex">
           {/* Key */}
           <div className="flex flex-col items-center px-4 border-r border-gray-700">
             <span className="text-[10px] uppercase tracking-widest text-gray-500 leading-none mb-1">
@@ -416,8 +437,10 @@ export function PlayerBar() {
         </div>
       )}
 
-      {/* ── RIGHT: Copy + Volume ── */}
-      <div className="flex items-center gap-3 shrink-0">
+      {/* ── RIGHT: Copy + Volume ──
+          Hidden on phones: a file path is of no use without a file manager
+          to paste it into, and the OS hardware keys already own volume. */}
+      <div className="hidden shrink-0 items-center gap-3 md:flex">
         <button
           onClick={handleCopy}
           disabled={disabled}

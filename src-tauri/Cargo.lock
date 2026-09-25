@@ -4623,7 +4623,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stack"
-version = "1.0.19"
+version = "1.0.20"
 dependencies = [
  "anyhow",
  "async-trait",

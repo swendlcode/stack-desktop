@@ -140,7 +140,7 @@ export function SmartSearch({
                   setOpen(false);
                 }}
                 aria-label="Clear search"
-                className="text-gray-400 transition-colors hover:text-stack-white"
+                className="-mr-1.5 flex h-9 w-9 shrink-0 items-center justify-center text-gray-400 transition-colors hover:text-stack-white md:mr-0 md:h-auto md:w-auto"
               >
                 <CloseCircle size={15} color="currentColor" variant="Linear" />
               </button>

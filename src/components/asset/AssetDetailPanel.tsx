@@ -25,8 +25,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { assetQueryKeys } from "../../hooks/useAssets";
 import type { Asset, MidiMeta, PresetMeta, SampleMeta } from "../../types";
 
-const PANEL_WIDTH = 340;
-
 export function AssetDetailPanel() {
   const detailAssetId = useUiStore((s) => s.detailAssetId);
   const closeDetail = useUiStore((s) => s.closeDetail);
@@ -43,9 +41,10 @@ export function AssetDetailPanel() {
   if (!detailAssetId) return null;
 
   return (
+    // A 340px column beside the grid leaves 50px of content on a phone, so
+    // below `md` the panel becomes a full-screen sheet over the app instead.
     <aside
-      className="flex shrink-0 flex-col border-l border-gray-700/60 bg-stack-black"
-      style={{ width: PANEL_WIDTH }}
+      className="flex flex-col border-l border-gray-700/60 bg-stack-black max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0 md:w-[340px] md:shrink-0"
       aria-label="Asset details"
     >
       <header className="flex items-center justify-between border-b border-gray-700/60 px-4 py-3">
@@ -54,7 +53,7 @@ export function AssetDetailPanel() {
         </h2>
         <button
           onClick={closeDetail}
-          className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-stack-white"
+          className="-mr-2 flex h-10 w-10 items-center justify-center rounded text-gray-500 hover:bg-gray-800 hover:text-stack-white md:mr-0 md:h-auto md:w-auto md:p-1"
           aria-label="Close details"
         >
           <CloseCircle size={18} variant="Linear" color="currentColor" />

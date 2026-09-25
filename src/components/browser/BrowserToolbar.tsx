@@ -336,7 +336,7 @@ export function BrowserToolbar({
 
       {/* ── Row 1: Type tabs ── */}
       {showTypeTabs && (
-        <div className="flex items-center gap-0.5 border-b border-gray-700/60 px-6 pt-2 pb-0">
+        <div className="scrollbar-none flex items-center gap-0.5 overflow-x-auto border-b border-gray-700/60 px-3 pb-0 pt-2 sm:px-6">
           {TYPES.map((t) => {
             const active =
               t.value === 'all'
@@ -346,7 +346,7 @@ export function BrowserToolbar({
               <button
                 key={t.value}
                 onClick={() => setTypes(t.value === 'all' ? [] : [t.value])}
-                className={`relative px-4 pb-2.5 pt-1.5 text-sm font-normal transition-colors ${
+                className={`relative shrink-0 px-3 pb-2.5 pt-2 text-sm font-normal transition-colors sm:px-4 sm:pt-1.5 ${
                   active ? 'text-stack-fire' : 'text-gray-400 hover:text-stack-white'
                 }`}
               >
@@ -360,32 +360,39 @@ export function BrowserToolbar({
         </div>
       )}
 
-      {/* ── Row 2: Search + filter dropdowns ── */}
-      <div className="flex items-center gap-2.5 px-6 py-2.5">
+      {/* ── Row 2: Search + filter dropdowns ──
+          Below `md` the row scrolls sideways instead of wrapping: a wrapped
+          filter row eats a third of a phone screen before a single result is
+          visible, and `overflow-x-auto` here (rather than on the page) is
+          what keeps the body from scrolling horizontally. Every child is
+          pinned `shrink-0` so labels don't get squeezed into two lines. */}
+      <div className="flex items-center gap-2 px-3 py-2.5 max-md:overflow-x-auto max-md:scrollbar-none sm:gap-2.5 sm:px-6">
         {showSearch && (
           <>
             <SmartSearch
-              className="w-80"
+              className="w-64 shrink-0 sm:w-80"
               placeholder={searchPlaceholder}
               value={draft}
               onChange={setDraft}
             />
-            <div className="h-5 w-px bg-gray-700" />
+            <div className="h-5 w-px shrink-0 bg-gray-700" />
           </>
         )}
 
-        <InstrumentDropdown />
-        <GenreDropdown />
-        {showLoopTypeFilter && <LoopTypeDropdown />}
-        {showKeyFilter && <KeyPicker />}
-        {showBpmFilter && <BpmDropdown />}
+        <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+          <InstrumentDropdown />
+          <GenreDropdown />
+          {showLoopTypeFilter && <LoopTypeDropdown />}
+          {showKeyFilter && <KeyPicker />}
+          {showBpmFilter && <BpmDropdown />}
+        </div>
 
-        <div className="h-5 w-px bg-gray-700" />
+        <div className="h-5 w-px shrink-0 bg-gray-700" />
 
         {showFavoritesFilter && (
           <button
             onClick={toggleFavoritesOnly}
-            className={`flex h-9 items-center gap-2 rounded-lg border px-3.5 text-sm font-normal transition-colors ${
+            className={`flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border px-3.5 md:h-9 text-sm font-normal transition-colors ${
               filters.favoritesOnly
                 ? 'border-stack-fire bg-stack-fire/10 text-stack-fire'
                 : 'border-gray-600 text-gray-300 hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white'
@@ -404,7 +411,7 @@ export function BrowserToolbar({
         {showPathChip && pathLabel && (
           <button
             onClick={() => setPathPrefix(null)}
-            className="flex h-9 items-center gap-2 rounded-lg border border-stack-fire bg-stack-fire/10 px-3.5 text-sm text-stack-fire"
+            className="flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-stack-fire md:h-9 bg-stack-fire/10 px-3.5 text-sm text-stack-fire"
             title={filters.pathPrefix ?? ''}
           >
             <CloseCircle size={13} variant="Linear" color="currentColor" />
@@ -418,13 +425,13 @@ export function BrowserToolbar({
               resetFilters();
               setDraft('');
             }}
-            className="text-sm text-gray-500 hover:text-stack-white transition-colors whitespace-nowrap"
+            className="shrink-0 whitespace-nowrap px-1 text-sm text-gray-500 transition-colors hover:text-stack-white"
           >
             Clear all
           </button>
         )}
 
-        <div className="flex-1" />
+        <div className="hidden flex-1 md:block" />
       </div>
 
       {/* ── Row 3: Quick category strip — live from facet counts ── */}
@@ -437,7 +444,7 @@ export function BrowserToolbar({
               <button
                 key={f.value}
                 onClick={() => toggleInstrument(f.value)}
-                className={`shrink-0 rounded-lg px-2 sm:px-3 py-1.5 text-xs sm:text-sm transition-colors whitespace-nowrap ${
+                className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2.5 text-xs transition-colors sm:px-3 sm:py-1.5 sm:text-sm ${
                   active
                     ? 'bg-stack-fire text-stack-black font-medium'
                     : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-stack-white'

@@ -10,7 +10,6 @@ import { useSelectionStore } from '../../stores/selectionStore';
 import { useColumnPrefs } from '../../hooks/useColumnPrefs';
 import { Checkbox } from '../ui/Checkbox';
 import { ContextMenu } from '../ui/ContextMenu';
-import { COL } from './assetColumns';
 
 export type AssetViewType = 'sample' | 'midi' | 'preset' | 'project' | 'favorites';
 
@@ -62,8 +61,8 @@ export function AssetColumnHeader({
 
   return (
     <div
-      className="sticky top-0 z-10 flex shrink-0 items-center border-b border-gray-700 bg-gray-900"
-      style={{ height: 32, paddingLeft: '12px', paddingRight: '12px' }}
+      className="sticky top-0 z-10 flex shrink-0 items-center border-b border-gray-700 bg-gray-900 px-2 sm:px-3"
+      style={{ height: 32 }}
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
@@ -72,8 +71,7 @@ export function AssetColumnHeader({
     >
       {/* ── CHECKBOX: select-all ── */}
       <div
-        className="flex shrink-0 items-center justify-center mr-2"
-        style={{ width: COL.checkbox }}
+        className="mr-1 flex w-7 shrink-0 items-center justify-center sm:mr-2 sm:w-10"
       >
         <Checkbox
           checked={allSelected}
@@ -84,14 +82,14 @@ export function AssetColumnHeader({
       </div>
 
       {/* ── LEFT: Filename ── */}
-      <div className="flex min-w-0 flex-[0.85] items-center" style={{ minWidth: '200px' }}>
+      <div className="flex min-w-[120px] flex-[0.85] items-center sm:min-w-[200px]">
         {/* Spacer for artwork + play + gaps — must track AssetRow's geometry */}
         <div style={{ width: compact ? 28 + 24 + 20 : 42 + 32 + 20 }} className="shrink-0" />
         <span className={LABEL_CLS}>Filename</span>
       </div>
 
       {/* ── CENTRE: type-specific columns ── */}
-      <div className="flex min-w-0 flex-[1.15] items-center justify-center gap-1 sm:gap-3 px-2 sm:px-4">
+      <div className="flex min-w-0 flex-[1.15] items-center justify-center gap-1 px-1 max-sm:flex-none sm:gap-3 sm:px-4">
         {(viewType === 'sample' || viewType === 'midi' || viewType === 'favorites') && (
           <>
             {showWaveform && (
@@ -102,7 +100,7 @@ export function AssetColumnHeader({
               </div>
             )}
             {showTimeBadge && (
-              <div className="shrink-0 text-right" style={{ minWidth: '40px' }}>
+              <div className="hidden shrink-0 text-right sm:block" style={{ minWidth: '40px' }}>
                 <span className={MONO_CLS}>Time</span>
               </div>
             )}
@@ -145,7 +143,7 @@ export function AssetColumnHeader({
       )}
 
       {/* ── RIGHT: spacer for fav + more ── */}
-      <div className="shrink-0" style={{ minWidth: '50px' }} />
+      <div className="min-w-[44px] shrink-0 sm:min-w-[50px]" />
 
       {menu && settings && (
         <ContextMenu

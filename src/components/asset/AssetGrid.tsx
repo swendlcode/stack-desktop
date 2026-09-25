@@ -413,9 +413,9 @@ export function AssetGrid({
                 width: '100%',
                 height: `${FOOTER_HEIGHT}px`,
               }}
-              className="flex items-center justify-center border-t border-gray-700/70"
+              className="flex items-center justify-center border-t border-gray-700/70 px-3"
             >
-              <div className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900/90 px-2 py-1">
+              <div className="flex max-w-full items-center gap-1.5 overflow-x-auto rounded-lg border border-gray-700 bg-gray-900/90 px-2 py-1 max-md:scrollbar-none">
                 <button
                   onClick={() => {
                     const newPage = page - 1;
@@ -436,7 +436,7 @@ export function AssetGrid({
                     }
                   }}
                   disabled={page <= 1}
-                  className="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-stack-white disabled:cursor-not-allowed disabled:opacity-35"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-stack-white disabled:cursor-not-allowed disabled:opacity-35 md:h-7 md:w-7"
                   aria-label="Previous page"
                 >
                   <ArrowLeft2 size={13} color="currentColor" variant="Linear" />
@@ -448,7 +448,7 @@ export function AssetGrid({
                     <button
                       key={p}
                       onClick={() => onPageChange(p)}
-                      className={`mono min-w-7 rounded px-2 py-1 text-xs transition-colors ${
+                      className={`mono min-w-10 shrink-0 rounded px-2 py-2.5 text-xs transition-colors md:min-w-7 md:py-1 ${
                         active
                           ? 'bg-stack-fire text-stack-black'
                           : 'text-gray-300 hover:bg-gray-800 hover:text-stack-white'
@@ -479,7 +479,7 @@ export function AssetGrid({
                     }
                   }}
                   disabled={page >= totalPages}
-                  className="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-stack-white disabled:cursor-not-allowed disabled:opacity-35"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-stack-white disabled:cursor-not-allowed disabled:opacity-35 md:h-7 md:w-7"
                   aria-label="Next page"
                 >
                   <ArrowRight2 size={13} color="currentColor" variant="Linear" />

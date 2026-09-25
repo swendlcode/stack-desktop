@@ -60,4 +60,5 @@ export {
   Maximize3,
   Maximize4,
   Eye,
+  HamburgerMenu,
 } from 'iconsax-reactjs';

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { TitleBar } from './components/layout/TitleBar';
 import { Sidebar } from './components/layout/Sidebar';
+import { MobileSidebar } from './components/layout/MobileSidebar';
 import { MainPanel } from './components/layout/MainPanel';
 import { StatusBar } from './components/layout/StatusBar';
 import { PlayerBar } from './components/player/PlayerBar';
@@ -196,7 +197,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-stack-black">
+    <div className="h-app flex w-full flex-col overflow-hidden bg-stack-black">
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
@@ -227,6 +228,9 @@ export default function App() {
       <SampleEditor />
       <PlayerBar />
       <StatusBar />
+      {/* Phone-width nav drawer — overlays the layout rather than occupying a
+          column in it, so it lives outside the main flex row. */}
+      <MobileSidebar />
       <OnboardingModal
         isOpen={onboardingOpen}
         onClose={closeOnboarding}

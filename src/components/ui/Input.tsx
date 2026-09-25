@@ -10,7 +10,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ leading, trailing, className = '', ...rest }, ref) => {
     return (
       <div
-        className={`flex h-9 items-center gap-2 rounded-md border border-gray-600 bg-gray-700 px-3 text-sm text-stack-white focus-within:border-stack-fire ${className}`}
+        // Taller below `md` so the field clears the touch-target floor on a
+        // phone; desktop keeps the original 36px box.
+        className={`flex h-10 items-center gap-2 rounded-md border border-gray-600 bg-gray-700 px-3 text-sm text-stack-white focus-within:border-stack-fire md:h-9 ${className}`}
       >
         {leading}
         <input

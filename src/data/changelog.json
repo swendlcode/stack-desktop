@@ -1,4 +1,17 @@
 {
+  "1.0.20": {
+    "date": "2026-09-25",
+    "title": "Built for phones",
+    "summary": "Opening Stack in a browser on a phone now gives you a real mobile layout instead of a squeezed desktop one.",
+    "highlights": [
+      "The sidebar becomes a slide-out menu on phones, so the library gets the full screen.",
+      "Player bar keeps artwork, title and a large play button within thumb reach; key and tempo move onto the title line.",
+      "Filters scroll sideways instead of stacking into a tall wall of buttons.",
+      "Buttons and rows are bigger and easier to tap.",
+      "Sample details open as a full-screen sheet rather than a cramped side panel.",
+      "Nothing changes on desktop."
+    ]
+  },
   "1.0.19": {
     "date": "2026-09-25",
     "title": "QR code fix",

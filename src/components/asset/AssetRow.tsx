@@ -18,7 +18,6 @@ import { WaveformViewer } from "./WaveformViewer";
 import { MidiViewer } from "./MidiViewer";
 import { DawBadge } from "./DawBadge";
 import { PackCover } from "./PackCover";
-import { COL } from "./assetColumns";
 import { usePlayerStore } from "../../stores/playerStore";
 import { assetService } from "../../services/assetService";
 import { projectService } from "../../services/projectService";
@@ -362,7 +361,7 @@ export const AssetRow = memo(function AssetRow({
 
   return (
     <div
-      className={`group flex items-center border-b border-gray-700/50 transition-colors ${
+      className={`group flex items-center border-b border-gray-700/50 px-2 transition-colors sm:px-3 ${
         canPlay ? "cursor-pointer" : ""
       } ${
         isLast ? "border-b-transparent" : ""
@@ -375,7 +374,7 @@ export const AssetRow = memo(function AssetRow({
               ? "bg-gray-700/40"
               : "group-hover:bg-gray-800/70"
       }`}
-      style={{ height: compact ? 40 : 64, paddingLeft: "12px", paddingRight: "12px" }}
+      style={{ height: compact ? 40 : 64 }}
       draggable
       onDragStart={(e) => {
         e.preventDefault();
@@ -411,12 +410,11 @@ export const AssetRow = memo(function AssetRow({
     >
       {/* ══ CHECKBOX: leftmost column, always present ══ */}
       <div
-        className={`flex shrink-0 items-center justify-center mr-2 transition-opacity ${
+        className={`mr-1 flex w-7 shrink-0 items-center justify-center transition-opacity sm:mr-2 sm:w-10 ${
           isMultiSelected || hasAnySelection
             ? "opacity-100"
             : "opacity-20 group-hover:opacity-100"
         }`}
-        style={{ width: COL.checkbox }}
         onClick={(e) => e.stopPropagation()}
       >
         <Checkbox
@@ -428,8 +426,7 @@ export const AssetRow = memo(function AssetRow({
 
       {/* ══ LEFT: Artwork · Play · Filename/Category ══ */}
       <div
-        className="flex min-w-0 flex-[0.85] items-center gap-2 sm:gap-3"
-        style={{ minWidth: "200px" }}
+        className="flex min-w-[120px] flex-[0.85] items-center gap-2 sm:min-w-[200px] sm:gap-3"
       >
         {/* Artwork — clean, no overlay */}
         <button
@@ -518,7 +515,7 @@ export const AssetRow = memo(function AssetRow({
       </div>
 
       {/* ══ CENTRE: type-specific columns ══ */}
-      <div className="flex min-w-0 flex-[1.15] items-center justify-center gap-1 sm:gap-3 px-2 sm:px-4">
+      <div className="flex min-w-0 flex-[1.15] items-center justify-center gap-1 px-1 max-sm:flex-none sm:gap-3 sm:px-4">
         {viewType === "preset" ? (
           /* Presets: Plugin only */
           <div className="flex flex-1 items-center justify-end pr-2 text-xs sm:text-sm text-gray-300">
@@ -574,7 +571,7 @@ export const AssetRow = memo(function AssetRow({
 
             {showTimeBadge && (
               <div
-                className="mono shrink-0 text-right text-xs sm:text-sm text-gray-500"
+                className="mono hidden shrink-0 text-right text-xs text-gray-500 sm:block sm:text-sm"
                 style={{ minWidth: "40px" }}
               >
                 {formatDuration(asset.durationMs)}
@@ -631,12 +628,12 @@ export const AssetRow = memo(function AssetRow({
 
       {/* ══ RIGHT: Favorite · More ══ */}
       <div
-        className="flex shrink-0 items-center justify-end gap-0.5 sm:gap-1"
-        style={{ width: "auto", minWidth: "50px" }}
+        className="flex min-w-[44px] shrink-0 items-center justify-end gap-0.5 sm:min-w-[50px] sm:gap-1"
+        style={{ width: "auto" }}
       >
         <button
           onClick={toggleFav}
-          className={`shrink-0 rounded-lg p-1 sm:p-1.5 transition-colors ${
+          className={`shrink-0 rounded-lg p-2.5 transition-colors sm:p-1.5 ${
             asset.isFavorite
               ? "text-stack-fire"
               : "text-gray-600 hover:text-stack-white"

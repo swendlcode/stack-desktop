@@ -15,8 +15,6 @@ import { assetQueryKeys } from '../../hooks/useAssets';
 import { useAssets } from '../../hooks/useAssets';
 import type { Asset } from '../../types';
 
-const PANEL_WIDTH = 340;
-
 // ── Presets ────────────────────────────────────────────────────────────────
 const INSTRUMENT_PRESETS = [
   'Drums', 'Bass', 'Keys', 'Guitar', 'Synth', 'Vocals',
@@ -154,8 +152,7 @@ export function BulkEditPanel({ onClose }: BulkEditPanelProps) {
 
   return (
     <aside
-      className="flex shrink-0 flex-col border-l border-gray-700/60 bg-stack-black"
-      style={{ width: PANEL_WIDTH }}
+      className="flex flex-col border-l border-gray-700/60 bg-stack-black max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0 md:w-[340px] md:shrink-0"
       aria-label="Bulk edit"
     >
       {/* ── Header — matches AssetDetailPanel header exactly ── */}
@@ -170,7 +167,7 @@ export function BulkEditPanel({ onClose }: BulkEditPanelProps) {
         </div>
         <button
           onClick={handleClearAndClose}
-          className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-stack-white"
+          className="-mr-2 flex h-10 w-10 items-center justify-center rounded text-gray-500 hover:bg-gray-800 hover:text-stack-white md:mr-0 md:h-auto md:w-auto md:p-1"
           aria-label="Clear selection and close"
           title="Clear selection"
         >

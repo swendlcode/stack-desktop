@@ -65,6 +65,12 @@ export type BrowserViewMode = 'pack' | 'project';
 interface UiStore {
   sidebarOpen: boolean;
   sidebarWidth: number;
+  /**
+   * Off-canvas nav drawer, used below the `md` breakpoint only. Deliberately
+   * not persisted: a drawer that reopens itself on load would cover the
+   * library every time the page is refreshed on a phone.
+   */
+  mobileNavOpen: boolean;
   activePage: ActivePage;
   activePackId: string | null;
   /** Which favorites folder (stack) is selected, or null for All Favorites. */
@@ -79,6 +85,8 @@ interface UiStore {
   setFavoriteStackId: (id: string | null) => void;
   setBrowserViewMode: (mode: BrowserViewMode) => void;
   toggleSidebar: () => void;
+  setMobileNavOpen: (open: boolean) => void;
+  toggleMobileNav: () => void;
   setSidebarWidth: (width: number) => void;
   setEditorHeight: (height: number) => void;
   toggleDetail: (assetId: string) => void;
@@ -94,6 +102,7 @@ interface UiStore {
 export const useUiStore = create<UiStore>((set) => ({
   sidebarOpen: loadOpen(),
   sidebarWidth: loadWidth(),
+  mobileNavOpen: false,
   activePage: 'browser',
   activePackId: null,
   favoriteStackId: null,
@@ -113,6 +122,8 @@ export const useUiStore = create<UiStore>((set) => ({
       try { localStorage.setItem(SIDEBAR_OPEN_KEY, String(next)); } catch {}
       return { sidebarOpen: next };
     }),
+  setMobileNavOpen: (mobileNavOpen) => set({ mobileNavOpen }),
+  toggleMobileNav: () => set((s) => ({ mobileNavOpen: !s.mobileNavOpen })),
   setSidebarWidth: (width) => {
     const clamped = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, width));
     try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped)); } catch {}

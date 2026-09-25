@@ -322,6 +322,15 @@
     app-region: no-drag;
   }
 
+  /* Full app height. `100dvh` tracks the shrinking/growing browser chrome on
+     a phone, so the player bar and status bar stay on screen instead of
+     sitting under the URL bar; the `100vh` line before it is the fallback for
+     webviews that predate dynamic viewport units. */
+  .h-app {
+    height: 100vh;
+    height: 100dvh;
+  }
+
   .scrollbar-none {
     scrollbar-width: none;
   }
