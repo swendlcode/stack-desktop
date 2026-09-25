@@ -3550,6 +3550,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+
+[[package]]
 name = "quick-xml"
 version = "0.38.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4617,7 +4623,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stack"
-version = "1.0.17"
+version = "1.0.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4633,6 +4639,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "plist",
+ "qrcode",
  "r2d2",
  "r2d2_sqlite",
  "regex",

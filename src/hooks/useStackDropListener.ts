@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { isTauri } from '../lib/tauri-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { stackService } from '../services/stackService';
 import { assetService } from '../services/assetService';
@@ -22,6 +23,11 @@ export function useStackDropListener() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    // Browser mode has no Tauri webview: getCurrentWebview() dereferences
+    // window.__TAURI_INTERNALS__.metadata and throws during the effect flush,
+    // which took the whole page down when opening Stack over the network.
+    if (!isTauri) return;
+
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 

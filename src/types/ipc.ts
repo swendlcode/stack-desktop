@@ -55,4 +55,6 @@ export interface WebAccessInfo {
   localUrl: string;
   lanUrl: string | null;
   lanIp: string | null;
+  /** Inline SVG QR code for lanUrl — scan it to open Stack on a phone. */
+  lanQrSvg: string | null;
 }

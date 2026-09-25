@@ -22,4 +22,7 @@ pub struct WebAccessInfo {
     pub lan_url: Option<String>,
     /// The detected LAN address, for display.
     pub lan_ip: Option<String>,
+    /// Inline SVG QR code for `lan_url`, so a phone camera can open it
+    /// without anyone typing a token by hand. `None` when there is no LAN URL.
+    pub lan_qr_svg: Option<String>,
 }

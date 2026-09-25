@@ -1,6 +1,6 @@
 [package]
 name = "stack"
-version = "1.0.17"
+version = "1.0.18"
 description = "Local sample library manager"
 authors = ["Stack"]
 edition = "2021"
@@ -41,6 +41,7 @@ walkdir = "2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 plist = "1"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 midly = "0.5"
 hound = "3.5"

@@ -1,4 +1,13 @@
 {
+  "1.0.18": {
+    "date": "2026-09-25",
+    "title": "Browser access fixes & a QR code for your phone",
+    "summary": "Opening Stack in a browser over the network works properly now, and Settings shows a QR code you can point a phone camera at.",
+    "highlights": [
+      "Fixed Stack failing to load when opened in a browser from another device.",
+      "Scan to open: the Web access section now shows a QR code for the network link, so you can open your library on a phone without typing a long address."
+    ]
+  },
   "1.0.17": {
     "date": "2026-09-24",
     "title": "Browse your library from any device",
