@@ -59,7 +59,19 @@ fn qr_svg(target: &str) -> Option<String> {
     // the markup is injected into an HTML document — hand back the bare
     // element so the frontend can drop it straight into the DOM.
     let start = rendered.find("<svg")?;
-    Some(rendered[start..].to_string())
+    let element = &rendered[start..];
+
+    // It also hard-codes width/height in pixels, which made the code overflow
+    // and clip inside its container. Drop them and let the viewBox scale it to
+    // whatever size the layout gives it.
+    let head_end = element.find('>')?;
+    let (head, body) = element.split_at(head_end);
+    let head = head
+        .split_whitespace()
+        .filter(|attr| !attr.starts_with("width=") && !attr.starts_with("height="))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(format!("{head} width=\"100%\" height=\"100%\"{body}"))
 }
 
 /// Build the info payload for the given configuration.
@@ -103,6 +115,17 @@ mod tests {
         assert!(svg.contains("#0c0c0c"), "expected dark modules in the output");
         assert!(!svg.contains("<?xml"), "XML prolog must be stripped for HTML embedding");
         assert!(svg.len() > 500, "suspiciously small QR: {} bytes", svg.len());
+        // Must scale to its container rather than carry a fixed pixel size,
+        // which previously overflowed and clipped the code.
+        assert!(svg.contains("viewBox"), "viewBox is what makes it scalable");
+        // Check the opening tag only: inner <rect> elements legitimately carry
+        // pixel-valued width/height in user units, which scale with the viewBox.
+        let open_tag = &svg[..svg.find('>').expect("opening tag")];
+        assert!(open_tag.contains("width=\"100%\""), "expected a fluid width");
+        assert!(
+            !open_tag.contains("width=\"180\""),
+            "fixed pixel width must be gone from the root element: {open_tag}"
+        );
     }
 
     #[test]

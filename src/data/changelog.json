@@ -1,4 +1,13 @@
 {
+  "1.0.19": {
+    "date": "2026-09-25",
+    "title": "QR code fix",
+    "summary": "The Web access QR code was cut off, and the section had more explaining than it needed.",
+    "highlights": [
+      "Fixed the QR code being clipped — it now scales to fit and scans properly.",
+      "Trimmed the wording in Web access settings."
+    ]
+  },
   "1.0.18": {
     "date": "2026-09-25",
     "title": "Browser access fixes & a QR code for your phone",
