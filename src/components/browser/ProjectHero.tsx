@@ -50,6 +50,7 @@ export function ProjectHero({ pathPrefix }: Props) {
           favoritesOnly: false,
           tags: [],
           pathPrefix,
+          pathPrefixes: [],
           energyLevels: [],
           textures: [],
           spaces: [],

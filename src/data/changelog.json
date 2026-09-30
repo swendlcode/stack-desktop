@@ -1,4 +1,15 @@
 {
+  "1.0.22": {
+    "date": "2026-09-30",
+    "title": "Your Splice library, in Stack",
+    "summary": "Stack finds your Splice downloads and puts every sound in one browsable view.",
+    "highlights": [
+      "Stack finds your Splice folder on its own \u2014 one click imports every account it finds.",
+      "All your Splice sounds in one view, with the usual search, filters, waveforms and player. Narrow to a single pack from the Pack menu.",
+      "Watched Folders in Settings is now a grid, and removing one asks first.",
+      "Removing a folder mid-scan no longer brings it back."
+    ]
+  },
   "1.0.21": {
     "date": "2026-09-25",
     "title": "Playback keeps going while you browse",

@@ -5,6 +5,7 @@ pub mod indexer;
 pub mod plugins;
 pub mod reconciler;
 pub mod scanner;
+pub mod splice;
 pub mod tree;
 pub mod watcher;
 

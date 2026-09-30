@@ -56,7 +56,20 @@ impl Scanner {
         let mut files = Vec::new();
         let mut skipped = 0usize;
 
-        for entry in WalkDir::new(root).follow_links(false) {
+        // `filter_entry` prunes the subtree. The previous `continue` on a
+        // skip-listed directory did nothing — a directory entry is not a file,
+        // so the next check skipped it anyway while WalkDir happily descended.
+        // That is why `backup/` was indexed despite being on the skip list,
+        // which on a Splice library means importing a full duplicate mirror.
+        // The root itself must never be pruned, or the walk yields nothing.
+        let walker = WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                e.depth() == 0 || !(e.file_type().is_dir() && Self::should_skip_dir(e.path()))
+            });
+
+        for entry in walker {
             let entry = match entry {
                 Ok(e) => e,
                 Err(err) => {
@@ -67,11 +80,6 @@ impl Scanner {
             };
 
             let path = entry.path();
-
-            // Skip directories that should be ignored
-            if entry.file_type().is_dir() && Self::should_skip_dir(path) {
-                continue;
-            }
 
             if !entry.file_type().is_file() {
                 continue;
@@ -179,5 +187,29 @@ pub fn classify(ext: &str) -> Option<&'static str> {
         Some("project")
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+
+    #[test]
+    fn skip_listed_directories_are_not_descended() {
+        let base = std::env::temp_dir().join(format!("stack-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // A Splice-shaped tree: real content plus the duplicate `backup` mirror.
+        std::fs::create_dir_all(base.join("sounds/packs/Pack A")).unwrap();
+        std::fs::create_dir_all(base.join("backup/sounds/packs/Pack A")).unwrap();
+        std::fs::create_dir_all(base.join("node_modules/x")).unwrap();
+        std::fs::write(base.join("sounds/packs/Pack A/kick.wav"), b"x").unwrap();
+        std::fs::write(base.join("backup/sounds/packs/Pack A/kick.wav"), b"x").unwrap();
+        std::fs::write(base.join("node_modules/x/bundled.wav"), b"x").unwrap();
+
+        let (files, _) = Scanner::scan(&base).unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+
+        assert_eq!(files.len(), 1, "only the real sample should be collected: {files:?}");
+        assert!(files[0].path.to_string_lossy().contains("sounds/packs"));
     }
 }

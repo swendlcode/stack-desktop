@@ -376,6 +376,8 @@ pub fn run() {
             commands::library_commands::scan_folder,
             commands::library_commands::add_watched_folder,
             commands::library_commands::add_project_folder,
+            commands::library_commands::detect_splice_library,
+            commands::library_commands::add_splice_folder,
             commands::library_commands::remove_watched_folder,
             commands::library_commands::get_watched_folders,
             commands::library_commands::get_scan_progress,

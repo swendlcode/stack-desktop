@@ -325,6 +325,7 @@ export function BrowserToolbar({
 
   const activeFilterCount =
     filters.types.length +
+    filters.packIds.length +
     filters.instruments.length +
     filters.keys.length +
     filters.scales.length +

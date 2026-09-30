@@ -76,6 +76,9 @@ pub async fn add_watched_folder(
     // ON CONFLICT(path) DO UPDATE SET is_active = 1 — safe to call even if already watched
     state.pack_repo.add_watched(&folder)?;
 
+    // Lift any exclusion left by a previous removal of this exact path.
+    state.indexer.unexclude(std::path::Path::new(&path));
+
     // Clean up any stale assets under this path that were left from a previous
     // removal. This prevents duplicates when a folder is removed then re-added.
     // Assets with index_status = 'missing' are safe to delete — they're already gone.
@@ -100,6 +103,10 @@ pub async fn remove_watched_folder(id: String, state: State<'_, AppState>) -> Re
     if let Some(path) = removed_path {
         let p = PathBuf::from(&path);
         state.watcher.unwatch(&p).ok();
+        // Before deleting: a scan started earlier may still be parsing files
+        // under this root, and those writes would land after the delete and
+        // resurrect the folder. Cleared again when the path is re-added.
+        state.indexer.exclude(&p);
 
         // Delete assets first (also cleans FTS), then atomically remove packs +
         // watched_folder row in a single operation so no partial state is left
@@ -176,6 +183,7 @@ pub async fn add_project_folder(
         kind: "project".to_string(),
     };
     state.pack_repo.add_watched(&folder)?;
+    state.indexer.unexclude(std::path::Path::new(&path));
 
     // Pre-create the pack row for this project root with parsed metadata so
     // the Projects page card can render before any file is indexed. The indexer
@@ -563,4 +571,49 @@ fn is_backup(path: &std::path::Path) -> bool {
         let s = c.as_os_str().to_string_lossy().to_ascii_lowercase();
         s == "backup" || s == "backups" || s.contains("auto-save") || s.contains("auto save")
     })
+}
+
+/// A Splice library on this machine, if one is installed.
+#[tauri::command]
+pub async fn detect_splice_library() -> Result<Option<crate::core::splice::SpliceLibrary>> {
+    tokio::task::spawn_blocking(crate::core::splice::detect)
+        .await
+        .map_err(|e| crate::error::StackError::Other(e.to_string()))
+}
+
+/// Watch one `…/sounds/packs` directory from a Splice library.
+///
+/// Registered as `kind = "splice"` so the UI can group these apart from
+/// hand-added folders. The path must be the inner packs directory: watching a
+/// Splice root instead collapses every pack into one named "sounds".
+#[tauri::command]
+pub async fn add_splice_folder(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<WatchedFolder> {
+    let now = unix_now();
+    let folder = WatchedFolder {
+        id: Uuid::new_v4().to_string(),
+        path: path.clone(),
+        is_active: true,
+        added_at: now,
+        kind: "splice".to_string(),
+    };
+    // add_watched upserts on path and overwrites kind, so this also promotes a
+    // folder the user had already added by hand.
+    state.pack_repo.add_watched(&folder)?;
+    state.indexer.unexclude(std::path::Path::new(&path));
+
+    let asset_repo = state.asset_repo.clone();
+    let path_clone = path.clone();
+    tokio::task::spawn_blocking(move || asset_repo.delete_missing_under_path(&path_clone))
+        .await
+        .map_err(|e| crate::error::StackError::Other(e.to_string()))??;
+
+    let p = PathBuf::from(&path);
+    if p.exists() {
+        state.watcher.watch(&p)?;
+    }
+
+    Ok(folder)
 }

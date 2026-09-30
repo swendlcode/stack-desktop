@@ -29,16 +29,16 @@ export function LibraryTree() {
     queryKey: ['watched-folders'],
     queryFn: () => libraryService.getWatchedFolders(),
   });
-  // Sidebar Packs section excludes project-kind folders — those live on the
-  // Projects page and would otherwise duplicate here.
+  // Sidebar Packs section excludes project- and splice-kind folders — those
+  // live on their own pages and would otherwise duplicate here.
   const sourceRoots = useMemo(() => {
-    const projectPaths = new Set(
+    const ownedPaths = new Set(
       watchedFolders
-        .filter((w) => w.kind === 'project')
+        .filter((w) => w.kind === 'project' || w.kind === 'splice')
         .map((w) => w.path.replace(/\\/g, '/').replace(/\/+$/, ''))
     );
     return sourceRootsAll.filter(
-      (n) => !projectPaths.has(n.path.replace(/\\/g, '/').replace(/\/+$/, ''))
+      (n) => !ownedPaths.has(n.path.replace(/\\/g, '/').replace(/\/+$/, ''))
     );
   }, [sourceRootsAll, watchedFolders]);
   const [moves, setMoves] = useState<MovesMap>(() => readPlaygroundMoves());

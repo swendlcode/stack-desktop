@@ -57,6 +57,11 @@ export function useLibrarySync() {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
           queryClient.invalidateQueries({ queryKey: assetQueryKeys.all });
+          // Pack rows carry asset_count, which climbs as indexing proceeds.
+          // Without this the counts stay at whatever they were when the pack
+          // row was created — freshly imported packs all read "0 files" until
+          // something else happened to invalidate them.
+          queryClient.invalidateQueries({ queryKey: packQueryKeys.all });
         }, 2000);
       })
     );

@@ -28,6 +28,10 @@ const PROGRESS_THROTTLE_MS: u64 = 250;
 /// pinned at minimum concurrency.
 const UPSERT_BATCH_SIZE: usize = 100;
 
+fn path_is_under_any(path: &std::path::Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| path.starts_with(root))
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum JobPriority {
     Low = 1,
@@ -75,6 +79,15 @@ pub struct Indexer {
     /// Full batches go to a single writer task — serializing upsert
     /// transactions instead of racing concurrent flushes for the write lock.
     upsert_tx: UnboundedSender<Vec<(Asset, Option<String>)>>,
+    /// Roots whose jobs must not be written.
+    ///
+    /// Removing a watched folder deletes its rows, but a scan started earlier
+    /// may still have hundreds of parsed assets in flight — they landed after
+    /// the delete and the folder reappeared in the library. Anything under one
+    /// of these prefixes is dropped at both choke points: before a job is
+    /// processed, and again in the writer, which is where already-parsed
+    /// assets sit.
+    excluded: Arc<parking_lot::RwLock<Vec<PathBuf>>>,
 }
 
 impl Indexer {
@@ -112,6 +125,7 @@ impl Indexer {
             pending_touches: Mutex::new(Vec::new()),
             pending_upserts: Mutex::new(Vec::new()),
             upsert_tx,
+            excluded: Arc::new(parking_lot::RwLock::new(Vec::new())),
         });
 
         // Dedicated writer: one batch transaction at a time, retried until it
@@ -120,8 +134,26 @@ impl Indexer {
         // fails while another writer is mid-transaction for >10s.
         let writer_repo = indexer.asset_repo.clone();
         let writer_retries = indexer.lock_retries_window.clone();
+        let writer_excluded = indexer.excluded.clone();
         tauri::async_runtime::spawn(async move {
             while let Some(items) = upsert_rx.recv().await {
+                // Drop anything under a root that was removed while this batch
+                // was being parsed, then skip the transaction entirely if that
+                // leaves nothing.
+                let items: Vec<(Asset, Option<String>)> = {
+                    let roots = writer_excluded.read();
+                    if roots.is_empty() {
+                        items
+                    } else {
+                        items
+                            .into_iter()
+                            .filter(|(a, _)| !path_is_under_any(std::path::Path::new(&a.path), &roots))
+                            .collect()
+                    }
+                };
+                if items.is_empty() {
+                    continue;
+                }
                 for attempt in 0..8u32 {
                     let repo = writer_repo.clone();
                     let batch = items.clone();
@@ -155,7 +187,7 @@ impl Indexer {
         let worker = indexer.clone();
         tauri::async_runtime::spawn(async move {
             while let Some(job) = rx.recv().await {
-                if worker.cancelled.load(Ordering::Relaxed) {
+                if worker.cancelled.load(Ordering::Relaxed) || worker.is_excluded(&job.path) {
                     worker.bump_indexed();
                     worker.emit_progress();
                     continue;
@@ -259,6 +291,24 @@ impl Indexer {
     pub fn reset_counters(&self) {
         let mut c = self.counters.lock();
         *c = Counters::default();
+    }
+
+    /// Stop writing anything under `root`. Idempotent.
+    pub fn exclude(&self, root: &std::path::Path) {
+        let mut roots = self.excluded.write();
+        if !roots.iter().any(|r| r == root) {
+            roots.push(root.to_path_buf());
+        }
+    }
+
+    /// Allow `root` to be indexed again — called when it is (re-)added.
+    pub fn unexclude(&self, root: &std::path::Path) {
+        self.excluded.write().retain(|r| r != root);
+    }
+
+    fn is_excluded(&self, path: &std::path::Path) -> bool {
+        let roots = self.excluded.read();
+        !roots.is_empty() && path_is_under_any(path, &roots)
     }
 
     pub fn cancel(&self) {
@@ -623,27 +673,35 @@ impl Indexer {
         let root = match pack_root_hint {
             Some(r) => r.to_path_buf(),
             None => {
-                // Watcher path: pack_root unknown. If the file lives inside
-                // any project-kind watched folder, the watched root IS the
-                // pack root — every project file maps to one project pack,
-                // never a subfolder pack. Otherwise fall back to parent dir.
-                let project_root = self
+                // Watcher path: pack_root unknown, so resolve it from the
+                // watched folder that contains this file.
+                //
+                // Falling straight back to the parent directory (the old
+                // behaviour for everything non-project) is wrong for any
+                // nested library: a Splice sample landing in
+                // `…/packs/<Pack>/<vendor>/one_shots/` would create a pack
+                // called "one_shots". Applying the same one-level-below rule
+                // the scan path uses keeps watcher-driven indexing consistent
+                // with a full scan.
+                let owning = self
                     .pack_repo
                     .list_watched()
                     .unwrap_or_default()
                     .into_iter()
-                    .filter(|w| w.kind == "project")
                     .filter_map(|w| {
                         let p = std::path::PathBuf::from(&w.path);
-                        if file_path.starts_with(&p) {
-                            Some(p)
-                        } else {
-                            None
-                        }
+                        file_path.starts_with(&p).then_some((p, w.kind))
                     })
-                    .max_by_key(|p| p.as_os_str().len());
-                match project_root {
-                    Some(p) => p,
+                    .max_by_key(|(p, _)| p.as_os_str().len());
+
+                match owning {
+                    // A project folder is itself the pack — every file in it
+                    // belongs to the one project.
+                    Some((p, kind)) if kind == "project" => p,
+                    Some((p, _)) => match crate::core::Scanner::detect_pack_root(file_path, &p) {
+                        Some(pack) => pack,
+                        None => p,
+                    },
                     None => match file_path.parent() {
                         Some(p) => p.to_path_buf(),
                         None => return Ok((None, None)),
@@ -695,4 +753,43 @@ fn unix_now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod exclusion_tests {
+    use super::*;
+
+    #[test]
+    fn matches_descendants_but_not_sibling_prefixes() {
+        let roots = vec![PathBuf::from("/Users/x/Splice/sounds/packs")];
+
+        assert!(path_is_under_any(
+            std::path::Path::new("/Users/x/Splice/sounds/packs/808 Flow/kick.wav"),
+            &roots
+        ));
+        assert!(path_is_under_any(
+            std::path::Path::new("/Users/x/Splice/sounds/packs"),
+            &roots
+        ));
+
+        // A sibling whose name merely starts with the root's last segment must
+        // not be swept up — this is why the check is component-wise and not a
+        // string prefix.
+        assert!(!path_is_under_any(
+            std::path::Path::new("/Users/x/Splice/sounds/packs-backup/kick.wav"),
+            &roots
+        ));
+        assert!(!path_is_under_any(
+            std::path::Path::new("/Users/x/Music/Samples/kick.wav"),
+            &roots
+        ));
+    }
+
+    #[test]
+    fn empty_root_list_excludes_nothing() {
+        assert!(!path_is_under_any(
+            std::path::Path::new("/Users/x/anything.wav"),
+            &[]
+        ));
+    }
 }

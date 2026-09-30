@@ -11,11 +11,18 @@ import {
   Cpu,
   MusicSquare,
   MusicFilter,
+  SpliceLogo,
   ArrowDown2,
   ArrowRight2,
 } from '../ui/icons';
 
-export const NAV_ITEMS: Array<{ id: ActivePage; label: string; icon: typeof Element3 }> = [
+export const NAV_ITEMS: Array<{
+  id: ActivePage;
+  label: string;
+  icon: typeof Element3;
+  /** Rule above the row — Splice is a separate library, not another view. */
+  dividerBefore?: boolean;
+}> = [
   { id: 'browser',   label: 'Browser',   icon: Element3    },
   { id: 'pack',      label: 'Packs',     icon: Folder      },
   { id: 'favorites', label: 'Favorites', icon: HeartAdd    },
@@ -23,15 +30,18 @@ export const NAV_ITEMS: Array<{ id: ActivePage; label: string; icon: typeof Elem
   { id: 'midi',      label: 'MIDI',      icon: Cpu         },
   { id: 'plugins',   label: 'Plugins',   icon: MusicFilter },
   { id: 'projects',  label: 'Projects',  icon: MusicSquare },
+  { id: 'splice',    label: 'Splice',    icon: SpliceLogo, dividerBefore: true },
 ];
 
 /** The nav items the user has switched on, in display order. */
 export function useVisibleNavItems() {
   const showPluginsNav = useUiStore((s) => s.showPluginsNav);
   const showProjectsNav = useUiStore((s) => s.showProjectsNav);
+  const showSpliceNav = useUiStore((s) => s.showSpliceNav);
   return NAV_ITEMS.filter((item) => {
     if (item.id === 'plugins' && !showPluginsNav) return false;
     if (item.id === 'projects' && !showProjectsNav) return false;
+    if (item.id === 'splice' && !showSpliceNav) return false;
     return true;
   });
 }
@@ -64,6 +74,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
         return (
           <div key={item.id}>
+            {item.dividerBefore && (
+              <div className="-mx-2 my-1.5 border-t border-gray-700" />
+            )}
             <div
               className={`group flex items-center rounded-md text-sm transition-colors ${
                 rowActive
@@ -73,11 +86,15 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             >
               <button
                 onClick={() => {
-                  // Clicking Browser or Projects always exits any drilled-in
-                  // view: Browser clears the path prefix; Projects also clears
-                  // it so users can re-click "Projects" while inside a project
-                  // to bounce back to the projects grid.
-                  if (item.id === 'browser' || item.id === 'projects') {
+                  // Clicking Browser, Projects or Splice always exits any
+                  // drilled-in view: Browser clears the path prefix; the other
+                  // two clear it so re-clicking the tab while inside a project
+                  // or a Splice pack bounces back to that tab's grid.
+                  if (
+                    item.id === 'browser' ||
+                    item.id === 'projects' ||
+                    item.id === 'splice'
+                  ) {
                     setPathPrefix(null);
                   }
                   if (isFavorites) setFavoriteStackId(null);

@@ -87,6 +87,10 @@ pub struct AssetFilters {
     #[serde(default)]
     pub tags: Vec<String>,
     pub path_prefix: Option<String>,
+    /// Several roots OR'd together — the Splice library lives in one folder per
+    /// account, so scoping a view to it needs more than a single prefix.
+    #[serde(default)]
+    pub path_prefixes: Vec<String>,
     /// Smart tag filters
     #[serde(default)]
     pub energy_levels: Vec<String>,

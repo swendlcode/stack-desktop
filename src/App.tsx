@@ -9,6 +9,7 @@ import { MainPanel } from './components/layout/MainPanel';
 import { StatusBar } from './components/layout/StatusBar';
 import { PlayerBar } from './components/player/PlayerBar';
 import { FolderPicker } from './components/library/FolderPicker';
+import { SpliceImportPrompt } from './components/library/SpliceImportPrompt';
 import { OverlayPage } from './pages/OverlayPage';
 import { AssetDetailPanel } from './components/asset/AssetDetailPanel';
 import { BulkEditPanel } from './components/asset/BulkEditPanel';
@@ -21,6 +22,7 @@ const PresetsPage = lazy(() => import('./pages/PresetsPage').then((m) => ({ defa
 const MidiPage = lazy(() => import('./pages/MidiPage').then((m) => ({ default: m.MidiPage })));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectsPage })));
 const PluginsPage = lazy(() => import('./pages/PluginsPage').then((m) => ({ default: m.PluginsPage })));
+const SplicePage = lazy(() => import('./pages/SplicePage').then((m) => ({ default: m.SplicePage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
@@ -138,6 +140,7 @@ export default function App() {
         route === 'midi' ||
         route === 'plugins' ||
         route === 'projects' ||
+        route === 'splice' ||
         route === 'settings'
       ) {
         const page = route === 'packs' ? 'pack' : route;
@@ -202,7 +205,10 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <MainPanel>
-          {showFirstLaunch && activePage !== 'settings' && activePage !== 'projects' ? (
+          {showFirstLaunch &&
+          activePage !== 'settings' &&
+          activePage !== 'projects' &&
+          activePage !== 'splice' ? (
             <FirstLaunchEmpty />
           ) : (
             <ErrorBoundary key={activePage}>
@@ -214,6 +220,7 @@ export default function App() {
                 {activePage === 'midi' && <MidiPage />}
                 {activePage === 'plugins' && <PluginsPage />}
                 {activePage === 'projects' && <ProjectsPage />}
+                {activePage === 'splice' && <SplicePage />}
                 {activePage === 'settings' && <SettingsPage />}
               </Suspense>
             </ErrorBoundary>
@@ -257,6 +264,7 @@ function FirstLaunchEmpty() {
         Point Stack to a sample library folder to start indexing.
       </p>
       <FolderPicker />
+      <SpliceImportPrompt />
     </div>
   );
 }

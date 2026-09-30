@@ -67,17 +67,17 @@ export function PackPage() {
 
   const sorted = useMemo<PackCard[]>(() => {
     const activeWatched = (watchedFolders as WatchedFolder[]).filter(
-      (w) => w.isActive && w.kind !== 'project'
+      (w) => w.isActive && w.kind !== 'project' && w.kind !== 'splice'
     );
     const watchedByPath = new Map(activeWatched.map((w) => [normalizePath(w.path), w]));
-    // Drop project-kind roots from the source tree so the Packs page only shows sample packs.
-    const projectRoots = new Set(
-      (watchedFolders as WatchedFolder[])
-        .filter((w) => w.kind === 'project')
-        .map((w) => normalizePath(w.path))
-    );
+    // Drop project- and splice-kind roots from the source tree: they have their
+    // own pages, and a Splice library would otherwise flood this grid.
+    const ownedRoots = (watchedFolders as WatchedFolder[])
+      .filter((w) => w.kind === 'project' || w.kind === 'splice')
+      .map((w) => normalizePath(w.path));
+    const ownedRootSet = new Set(ownedRoots);
     const filteredSourceTree = sourceTree.filter(
-      (node) => !projectRoots.has(normalizePath(node.path))
+      (node) => !ownedRootSet.has(normalizePath(node.path))
     );
     const virtualRoots = playgroundEnabled
       ? buildPlaygroundTree(filteredSourceTree, readPlaygroundMoves())
@@ -87,7 +87,9 @@ export function PackPage() {
       const path = normalizePath(node.path);
       const under = packs.filter((p) => {
         const rp = normalizePath(p.rootPath);
-        return (rp === path || rp.startsWith(`${path}/`)) && p.kind !== 'project';
+        if (p.kind === 'project' || p.kind === 'splice') return false;
+        if (ownedRoots.some((r) => rp === r || rp.startsWith(`${r}/`))) return false;
+        return rp === path || rp.startsWith(`${path}/`);
       });
       const watched = watchedByPath.get(path);
       return {

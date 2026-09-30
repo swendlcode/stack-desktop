@@ -80,6 +80,51 @@ function VolumeSlider({ value, onChange }: { value: number; onChange: (v: number
 
 // ─── Folder row ───────────────────────────────────────────────────────────────
 
+/** Watched folders are listed flat, so the non-default kinds say what they are. */
+function FolderKindBadge({ kind }: { kind: WatchedFolder['kind'] }) {
+  if (kind !== 'splice' && kind !== 'project') return null;
+  const label = kind === 'splice' ? 'Splice' : 'Project';
+  const tone =
+    kind === 'splice'
+      ? 'border-stack-fire/50 bg-stack-fire/10 text-stack-fire'
+      : 'border-gray-600 bg-gray-700 text-gray-300';
+  return (
+    <span
+      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * A name for the tile heading.
+ *
+ * Splice registers `<library>/sounds/packs`, so the last segment is "packs" for
+ * every account — three tiles all reading the same word. Dropping that suffix
+ * leaves the library folder, which is what distinguishes them.
+ */
+function folderLabel(folder: WatchedFolder): string {
+  const parts = folder.path.split(/[/\\]/).filter(Boolean);
+  if (
+    folder.kind === 'splice' &&
+    parts.length > 2 &&
+    parts[parts.length - 1] === 'packs' &&
+    parts[parts.length - 2] === 'sounds'
+  ) {
+    return parts[parts.length - 3]!;
+  }
+  return parts[parts.length - 1] ?? folder.path;
+}
+
+/**
+ * One watched folder as a compact tile.
+ *
+ * These used to be full-width cards with a labelled Remove button, which meant
+ * six folders filled the screen before the rest of Settings appeared. A Splice
+ * import alone adds three. The folder name leads, the full path sits under it
+ * for disambiguation, and the stats collapse to a single mono line.
+ */
 function FolderInfoRow({ folder, onRemove }: { folder: WatchedFolder; onRemove: () => void }) {
   const { data: info, isLoading } = useQuery<FolderInfo>({
     queryKey: ['folder-info', folder.path],
@@ -87,30 +132,58 @@ function FolderInfoRow({ folder, onRemove }: { folder: WatchedFolder; onRemove: 
     staleTime: 60_000,
   });
 
+  const name = folderLabel(folder);
+  // Removing cascade-deletes every asset and pack under the path, and the trash
+  // is a small hover target in a dense grid — so it asks first.
+  const [confirming, setConfirming] = useState(false);
+
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-gray-700 bg-gray-800 p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="mono text-sm text-stack-white truncate flex-1" title={folder.path}>
-          {folder.path}
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<Trash size={14} variant="Linear" color="currentColor" />}
-          onClick={onRemove}
+    <div className="group flex min-w-0 flex-col gap-1 rounded-md border border-gray-700 bg-gray-800 p-3">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-stack-white" title={folder.path}>
+          {name}
+        </span>
+        <FolderKindBadge kind={folder.kind} />
+        {/* Hover-revealed on pointer devices, always visible on touch. */}
+        <button
+          onClick={() => setConfirming(true)}
+          title="Remove folder"
+          aria-label={`Remove ${name}`}
+          className="shrink-0 rounded p-1 text-gray-500 opacity-100 transition-colors hover:bg-red-500/10 hover:text-red-400 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
         >
-          Remove
-        </Button>
+          <Trash size={14} variant="Linear" color="currentColor" />
+        </button>
       </div>
-      {isLoading ? (
-        <div className="text-xs text-gray-500">Loading…</div>
-      ) : info ? (
-        <div className="flex flex-wrap gap-4 text-xs text-gray-400">
-          <span><span className="text-gray-500">Size: </span><span className="mono text-gray-300">{formatBytes(info.totalSizeBytes)}</span></span>
-          <span><span className="text-gray-500">Files: </span><span className="mono text-gray-300">{info.fileCount.toLocaleString()}</span></span>
-          <span><span className="text-gray-500">Indexed: </span><span className="mono text-gray-300">{info.assetCount.toLocaleString()} assets</span></span>
+
+      <p className="mono truncate text-[11px] text-gray-500" title={folder.path}>
+        {folder.path}
+      </p>
+
+      {confirming ? (
+        <div className="flex items-center gap-2">
+          <span className="flex-1 text-[11px] text-gray-400">Remove from Stack?</span>
+          <button
+            onClick={onRemove}
+            className="rounded border border-red-500/40 px-2 py-0.5 text-[11px] text-red-300 transition-colors hover:bg-red-500/10"
+          >
+            Remove
+          </button>
+          <button
+            onClick={() => setConfirming(false)}
+            className="rounded px-2 py-0.5 text-[11px] text-gray-400 transition-colors hover:text-stack-white"
+          >
+            Cancel
+          </button>
         </div>
-      ) : null}
+      ) : (
+        <p className="mono text-[11px] text-gray-400">
+          {isLoading
+            ? 'Reading…'
+            : info
+              ? `${formatBytes(info.totalSizeBytes)} · ${info.fileCount.toLocaleString()} files · ${info.assetCount.toLocaleString()} indexed`
+              : '—'}
+        </p>
+      )}
     </div>
   );
 }
@@ -315,8 +388,10 @@ export function SettingsPage() {
   const qc = useQueryClient();
   const showPluginsNav = useUiStore((s) => s.showPluginsNav);
   const showProjectsNav = useUiStore((s) => s.showProjectsNav);
+  const showSpliceNav = useUiStore((s) => s.showSpliceNav);
   const setShowPluginsNav = useUiStore((s) => s.setShowPluginsNav);
   const setShowProjectsNav = useUiStore((s) => s.setShowProjectsNav);
+  const setShowSpliceNav = useUiStore((s) => s.setShowSpliceNav);
 
   const { data: savedSettings } = useQuery({
     queryKey: ['settings'],
@@ -417,7 +492,7 @@ export function SettingsPage() {
               No folders watched yet. Add one from the sidebar.
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               {folders.map((f) => (
                 <FolderInfoRow key={f.id} folder={f} onRemove={() => remove(f.id)} />
               ))}
@@ -511,6 +586,15 @@ export function SettingsPage() {
             <Toggle
               checked={showProjectsNav}
               onChange={setShowProjectsNav}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Show Splice in sidebar"
+            description="Display the Splice section in the left sidebar navigation."
+          >
+            <Toggle
+              checked={showSpliceNav}
+              onChange={setShowSpliceNav}
             />
           </SettingRow>
           <SettingRow

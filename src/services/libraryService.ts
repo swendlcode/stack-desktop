@@ -9,6 +9,7 @@ import type {
   TreeNode,
   FolderInfo,
   ProjectInfo,
+  SpliceLibrary,
 } from '../types';
 
 export const libraryService = {
@@ -22,6 +23,15 @@ export const libraryService = {
 
   addProjectFolder(path: string): Promise<WatchedFolder> {
     return invoke('add_project_folder', { path });
+  },
+
+  /** Null when no Splice library is installed. */
+  detectSpliceLibrary(): Promise<SpliceLibrary | null> {
+    return invoke('detect_splice_library');
+  },
+
+  addSpliceFolder(path: string): Promise<WatchedFolder> {
+    return invoke('add_splice_folder', { path });
   },
 
   removeWatchedFolder(id: string): Promise<void> {

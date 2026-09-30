@@ -16,6 +16,12 @@ interface FacetDropdownProps {
   labels?: Record<string, string>;
   /** Show a filter box once the list is longer than this. */
   searchThreshold?: number;
+  /**
+   * Cap on rendered rows. The list isn't virtualized, and a Splice library has
+   * ~1,800 packs — rendering them all locks the dropdown open for a second.
+   * Anything beyond the cap is reachable through the filter box.
+   */
+  maxVisible?: number;
 }
 
 function titleCase(value: string) {
@@ -35,6 +41,7 @@ export function FacetDropdown({
   onClear,
   labels = {},
   searchThreshold = 12,
+  maxVisible = 400,
 }: FacetDropdownProps) {
   const [filter, setFilter] = useState('');
 
@@ -52,6 +59,9 @@ export function FacetDropdown({
       (f) => f.value.toLowerCase().includes(q) || (labels[f.value] ?? '').toLowerCase().includes(q),
     );
   }, [live, filter, labels]);
+
+  const visible = shown.length > maxVisible ? shown.slice(0, maxVisible) : shown;
+  const hiddenCount = shown.length - visible.length;
 
   const isActive = selected.length > 0;
   const label = isActive
@@ -83,7 +93,7 @@ export function FacetDropdown({
             {live.length === 0 ? `No ${plural} detected` : 'No matches'}
           </p>
         )}
-        {shown.map((f) => {
+        {visible.map((f) => {
           const active = selected.includes(f.value);
           return (
             <label
@@ -108,6 +118,11 @@ export function FacetDropdown({
             </label>
           );
         })}
+        {hiddenCount > 0 && (
+          <p className="px-4 py-2 text-xs text-gray-600">
+            {hiddenCount.toLocaleString()} more — keep typing to narrow
+          </p>
+        )}
       </div>
 
       {isActive && (

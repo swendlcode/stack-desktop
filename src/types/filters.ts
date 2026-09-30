@@ -14,6 +14,8 @@ export interface AssetFilters {
   favoritesOnly: boolean;
   tags: string[];
   pathPrefix: string | null;
+  /** Several roots OR'd together (the Splice library is one folder per account). */
+  pathPrefixes: string[];
   /** Smart tag filters */
   energyLevels: string[];
   textures: string[];
@@ -43,6 +45,7 @@ export const DEFAULT_FILTERS: AssetFilters = {
   favoritesOnly: false,
   tags: [],
   pathPrefix: null,
+  pathPrefixes: [],
   energyLevels: [],
   textures: [],
   spaces: [],

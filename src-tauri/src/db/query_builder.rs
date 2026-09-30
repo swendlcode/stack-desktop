@@ -315,6 +315,23 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
         params.push(Value::Text(path_upper_bound(prefix)));
     }
 
+    // Several roots at once (the Splice library is one folder per account).
+    // Same range form as above, OR'd — SQLite can satisfy each branch from
+    // `idx_assets_path` instead of falling back to a scan.
+    let prefixes: Vec<&String> = filters
+        .path_prefixes
+        .iter()
+        .filter(|p| !p.is_empty())
+        .collect();
+    if !prefixes.is_empty() {
+        let clause = vec!["(path >= ? AND path < ?)"; prefixes.len()].join(" OR ");
+        sql.push_str(&format!(" AND ({})", clause));
+        for prefix in prefixes {
+            params.push(Value::Text(prefix.to_string()));
+            params.push(Value::Text(path_upper_bound(prefix)));
+        }
+    }
+
     if !filters.energy_levels.is_empty() {
         let placeholders = vec!["?"; filters.energy_levels.len()].join(",");
         sql.push_str(&format!(" AND energy_level IN ({})", placeholders));

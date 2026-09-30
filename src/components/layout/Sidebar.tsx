@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { Fragment, useCallback, useEffect, useRef } from 'react';
 import { ScrollArea } from '../ui/ScrollArea';
 import { LibraryTree } from '../library/LibraryTree';
 import { SidebarNav, useVisibleNavItems } from './SidebarNav';
@@ -85,8 +85,9 @@ export function Sidebar() {
           const Icon = item.icon;
           const active = activePage === item.id;
           return (
+            <Fragment key={item.id}>
+              {item.dividerBefore && <div className="my-1 w-full border-t border-gray-700" />}
             <button
-              key={item.id}
               onClick={() => {
                 // Clicking Browser or Projects always exits any drilled-in
                 // view: Browser clears the path prefix; Projects also clears
@@ -106,6 +107,7 @@ export function Sidebar() {
             >
               <Icon size={16} color="currentColor" variant={active ? 'Bulk' : 'Linear'} />
             </button>
+            </Fragment>
           );
         })}
 

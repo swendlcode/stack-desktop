@@ -1,4 +1,20 @@
-export type PackKind = 'pack' | 'project';
+export type PackKind = 'pack' | 'project' | 'splice';
+
+/** One registerable `…/sounds/packs` directory inside a Splice library. */
+export interface SpliceRoot {
+  path: string;
+  /** Account folder this came from, when it is not the main library. */
+  account: string | null;
+  packCount: number;
+}
+
+/** What `detect_splice_library` found on disk, or null when Splice isn't installed. */
+export interface SpliceLibrary {
+  /** The Splice folder itself, for display. */
+  root: string;
+  roots: SpliceRoot[];
+  totalPacks: number;
+}
 
 export interface ProjectFolderMeta {
   title: string;

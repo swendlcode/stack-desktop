@@ -7,6 +7,7 @@ export type ActivePage =
   | 'midi'
   | 'plugins'
   | 'projects'
+  | 'splice'
   | 'pack'
   | 'settings';
 
@@ -15,6 +16,7 @@ const SIDEBAR_OPEN_KEY = 'stack:sidebarOpen';
 const EDITOR_HEIGHT_KEY = 'stack:editorHeight';
 const SHOW_PLUGINS_NAV_KEY = 'stack:showPluginsNav';
 const SHOW_PROJECTS_NAV_KEY = 'stack:showProjectsNav';
+const SHOW_SPLICE_NAV_KEY = 'stack:showSpliceNav';
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 480;
 const DEFAULT_WIDTH = 240;
@@ -81,6 +83,7 @@ interface UiStore {
   editorHeight: number;
   showPluginsNav: boolean;
   showProjectsNav: boolean;
+  showSpliceNav: boolean;
   setActivePage: (page: ActivePage, packId?: string) => void;
   setFavoriteStackId: (id: string | null) => void;
   setBrowserViewMode: (mode: BrowserViewMode) => void;
@@ -97,6 +100,7 @@ interface UiStore {
   snapEditorHeight: () => void;
   setShowPluginsNav: (show: boolean) => void;
   setShowProjectsNav: (show: boolean) => void;
+  setShowSpliceNav: (show: boolean) => void;
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -112,6 +116,9 @@ export const useUiStore = create<UiStore>((set) => ({
   editorHeight: loadEditorHeight(),
   showPluginsNav: loadNavVisibility(SHOW_PLUGINS_NAV_KEY, false),
   showProjectsNav: loadNavVisibility(SHOW_PROJECTS_NAV_KEY, false),
+  // Defaulted on: the section is self-explanatory when empty (it says whether a
+  // Splice library was found) and costs nothing when the user has no Splice.
+  showSpliceNav: loadNavVisibility(SHOW_SPLICE_NAV_KEY, true),
   setActivePage: (activePage, packId) =>
     set({ activePage, activePackId: packId ?? null }),
   setFavoriteStackId: (favoriteStackId) => set({ favoriteStackId }),
@@ -163,6 +170,13 @@ export const useUiStore = create<UiStore>((set) => ({
     set((s) => ({
       showProjectsNav,
       activePage: !showProjectsNav && s.activePage === 'projects' ? 'browser' : s.activePage,
+    }));
+  },
+  setShowSpliceNav: (showSpliceNav) => {
+    try { localStorage.setItem(SHOW_SPLICE_NAV_KEY, String(showSpliceNav)); } catch {}
+    set((s) => ({
+      showSpliceNav,
+      activePage: !showSpliceNav && s.activePage === 'splice' ? 'browser' : s.activePage,
     }));
   },
 }));

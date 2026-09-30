@@ -10,6 +10,7 @@ interface FilterStore {
   toggleType: (type: AssetType) => void;
   setTypes: (types: AssetType[]) => void;
   togglePack: (id: string) => void;
+  setPackIds: (ids: string[]) => void;
   toggleKey: (key: string) => void;
   toggleScale: (scale: KeyScale) => void;
   clearKeys: () => void;
@@ -22,6 +23,7 @@ interface FilterStore {
   clearGenres: () => void;
   toggleFavoritesOnly: () => void;
   setPathPrefix: (prefix: string | null) => void;
+  setPathPrefixes: (prefixes: string[]) => void;
   setSort: (sort: SortOptions) => void;
   resetFilters: () => void;
   // Smart tag toggles
@@ -90,6 +92,8 @@ export const useFilterStore = create<FilterStore>((set) => ({
       filters: { ...s.filters, packIds: toggle(s.filters.packIds, id) },
     })),
 
+  setPackIds: (packIds) => set((s) => ({ filters: { ...s.filters, packIds } })),
+
   toggleKey: (key) =>
     set((s) => ({ filters: { ...s.filters, keys: toggle(s.filters.keys, key) } })),
 
@@ -133,11 +137,18 @@ export const useFilterStore = create<FilterStore>((set) => ({
   setPathPrefix: (pathPrefix) =>
     set((s) => ({ filters: { ...s.filters, pathPrefix } })),
 
+  setPathPrefixes: (pathPrefixes) =>
+    set((s) => ({ filters: { ...s.filters, pathPrefixes } })),
+
   setSort: (sort) => {
     saveSort(sort);
     set({ sort });
   },
-  resetFilters: () => set({ filters: DEFAULT_FILTERS }),
+  // `pathPrefixes` is the page's scope, not one of the user's filters — the
+  // Splice view would fall back to the whole library on "Clear all" if this
+  // dropped it. The page that set it clears it when it unmounts.
+  resetFilters: () =>
+    set((s) => ({ filters: { ...DEFAULT_FILTERS, pathPrefixes: s.filters.pathPrefixes } })),
 
   toggleEnergyLevel: (level) =>
     set((s) => ({

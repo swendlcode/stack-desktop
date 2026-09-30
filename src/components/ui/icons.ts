@@ -61,4 +61,8 @@ export {
   Maximize4,
   Eye,
   HamburgerMenu,
+  Import,
 } from 'iconsax-reactjs';
+
+// Not an iconsax glyph — Splice's own mark, for the Splice library nav.
+export { SpliceLogo } from './SpliceLogo';

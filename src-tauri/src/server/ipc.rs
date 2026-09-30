@@ -63,6 +63,8 @@ pub async fn dispatch(app: AppHandle, cmd: &str, body: Value) -> Result<Value, S
         "scan_folder" => to_val(lc::scan_folder(f!("path"), app.state()).await?),
         "add_watched_folder" => to_val(lc::add_watched_folder(f!("path"), app.state()).await?),
         "add_project_folder" => to_val(lc::add_project_folder(f!("path"), app.state()).await?),
+        "detect_splice_library" => to_val(lc::detect_splice_library().await?),
+        "add_splice_folder" => to_val(lc::add_splice_folder(f!("path"), app.state()).await?),
         "remove_watched_folder" => {
             to_val(lc::remove_watched_folder(f!("id"), app.state()).await?)
         }
