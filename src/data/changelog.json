@@ -4,11 +4,11 @@
     "title": "Search that answers what you asked",
     "summary": "Search was quietly rewriting your words into other words. It no longer does.",
     "highlights": [
-      "Searching \u201ccrowd\u201d returned 1,212 results, nearly all of them chords \u2014 it now returns the 119 crowd sounds you asked for.",
-      "Results arrive faster: the first letter you type no longer scans 41,000 files.",
-      "A new search clears your filters, so results are never hidden by a BPM or key you set earlier.",
-      "Enter now closes the suggestions list.",
-      "The search term is shown above the results, with one click to clear it."
+      "Search looks for what you typed, not for words that merely resemble it \u2014 no more unrelated results crowding out the ones you wanted.",
+      "Results come back faster, especially on the first few letters.",
+      "A new search clears your filters, so nothing is hidden by a BPM or key you set earlier.",
+      "Enter closes the suggestions list.",
+      "The search term sits above the results, with one click to clear it."
     ]
   },
   "1.0.22": {
