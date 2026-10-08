@@ -162,32 +162,24 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
     let mut params: Vec<Value> = Vec::new();
 
     if !filters.query.trim().is_empty() {
-        static KNOWN_TERMS: &[&str] = &[
-            "atmosphere", "atmospheric", "ambient",
-            "drum", "drums", "percussion",
-            "bass", "synth", "lead", "pad",
-            "pluck", "chord", "arp", "keys",
-            "piano", "guitar", "strings", "brass",
-            "vocal", "fx", "dark", "bright",
-            "warm", "cold", "soft", "hard",
-            "electronic", "acoustic", "loop", "oneshot",
-        ];
-
+        // Normalisation + synonyms only. Fuzzy variants used to be folded in
+        // here, matched against a hardcoded 28-word list, and they rewrote the
+        // user's query into other words: "crowd" became
+        // `(chord*) OR (cold*) OR (crowd*)` — 1,212 rows instead of 119, most
+        // of them chords. A single character was worse: "c" expanded to nine
+        // terms including `c*` and scanned 41k rows in 245ms, on every
+        // keystroke. Typo tolerance belongs in `search::suggestions`, which
+        // offers corrections from `assets_vocab` — words that are actually in
+        // this library — rather than silently answering a different question.
         let processed_query = {
             let mut processor = QUERY_PROCESSOR.lock().unwrap();
-            let known_terms: Vec<String> = KNOWN_TERMS.iter().map(|s| s.to_string()).collect();
-            processor.process_query(&filters.query, &known_terms)
+            processor.process_query(&filters.query, &[])
         };
 
-        // Build a comprehensive search that includes:
-        // 1. Original query
-        // 2. Expanded synonyms
-        // 3. Fuzzy variants for typo tolerance
         let mut search_conditions = Vec::new();
         let mut all_queries = vec![processed_query.normalized.clone()];
         all_queries.extend(processed_query.expanded_terms);
-        all_queries.extend(processed_query.fuzzy_variants);
-        
+
         // Remove duplicates and empty queries
         all_queries.sort();
         all_queries.dedup();
@@ -400,4 +392,41 @@ pub fn path_upper_bound(prefix: &str) -> String {
     }
     // An all-0xFF prefix has no finite upper bound; fall back to the max char.
     format!("{}\u{10FFFF}", prefix)
+}
+
+#[cfg(test)]
+mod search_expression_tests {
+    use super::*;
+
+    fn match_expr_for(query: &str) -> String {
+        let mut f = AssetFilters::default();
+        f.query = query.to_string();
+        let (_, params) = build_where(&f);
+        match params.first() {
+            Some(Value::Text(t)) => t.clone(),
+            other => panic!("expected a MATCH expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_word_is_not_rewritten_into_other_words() {
+        // Regression: fuzzy expansion against a hardcoded term list turned this
+        // into `(chord*) OR (cold*) OR (crowd*)` and returned 10x the rows,
+        // nearly all of them chords.
+        assert_eq!(match_expr_for("crowd"), "(crowd*)");
+    }
+
+    #[test]
+    fn a_single_character_stays_one_prefix() {
+        // Was nine terms including `c*` — 41k rows scanned per keystroke.
+        assert_eq!(match_expr_for("c"), "(c*)");
+    }
+
+    #[test]
+    fn synonyms_are_still_expanded() {
+        // Synonyms are deliberate and stay: "vocal" should also find "vox".
+        let expr = match_expr_for("vocal");
+        assert!(expr.contains("(vocal*)"), "{expr}");
+        assert!(expr.contains("vox*"), "{expr}");
+    }
 }

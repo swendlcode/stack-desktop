@@ -8,6 +8,7 @@ import { BrowserToolbar } from '../components/browser/BrowserToolbar';
 import { ResultsHeader } from '../components/browser/ResultsHeader';
 import { FolderHero } from '../components/browser/FolderHero';
 import { ProjectHero } from '../components/browser/ProjectHero';
+import { SearchHero } from '../components/browser/SearchHero';
 import { useFilterStore } from '../stores/filterStore';
 import { useUiStore } from '../stores/uiStore';
 import { usePacks } from '../hooks/usePacks';
@@ -46,6 +47,7 @@ export function BrowserPage() {
   const browserViewMode = useUiStore((s) => s.browserViewMode);
   const { data: packs = [] } = usePacks();
   const viewType = filters.types[0] ?? 'favorites';
+  const searching = filters.query.trim().length > 0;
   const atProjectRoot =
     browserViewMode === 'project' &&
     !!filters.pathPrefix &&
@@ -60,12 +62,20 @@ export function BrowserPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
-        {/* Hero scrolls away above the sticky toolbar band */}
-        {filters.pathPrefix && atProjectRoot && (
-          <ProjectHero pathPrefix={filters.pathPrefix} />
-        )}
-        {filters.pathPrefix && !atProjectRoot && (
-          <FolderHero pathPrefix={filters.pathPrefix} totalCount={totalCount} />
+        {/* Hero scrolls away above the sticky toolbar band. While searching,
+            the query is the heading — the folder you happen to be scoped to is
+            secondary and still shown as a chip in the toolbar. */}
+        {searching ? (
+          <SearchHero query={filters.query} />
+        ) : (
+          <>
+            {filters.pathPrefix && atProjectRoot && (
+              <ProjectHero pathPrefix={filters.pathPrefix} />
+            )}
+            {filters.pathPrefix && !atProjectRoot && (
+              <FolderHero pathPrefix={filters.pathPrefix} totalCount={totalCount} />
+            )}
+          </>
         )}
 
         {/* Toolbar + column header — optionally sticky */}

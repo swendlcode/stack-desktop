@@ -76,7 +76,28 @@ export const useFilterStore = create<FilterStore>((set) => ({
   filters: DEFAULT_FILTERS,
   sort: loadSort(),
 
-  setQuery: (query) => set((s) => ({ filters: { ...s.filters, query } })),
+  // A new search starts from a clean slate. Leaving BPM, key, instrument and
+  // the rest in place meant a search silently ran inside whatever was set
+  // before, and returned nothing with no visible reason why. The view's own
+  // context survives: which tab you are on (`types`), where you are scoped
+  // (`pathPrefix`/`pathPrefixes`) and which pack you picked.
+  setQuery: (query) =>
+    set((s) => {
+      const next = query.trim();
+      if (next === '' || next === s.filters.query.trim()) {
+        return { filters: { ...s.filters, query } };
+      }
+      return {
+        filters: {
+          ...DEFAULT_FILTERS,
+          query,
+          types: s.filters.types,
+          packIds: s.filters.packIds,
+          pathPrefix: s.filters.pathPrefix,
+          pathPrefixes: s.filters.pathPrefixes,
+        },
+      };
+    }),
 
   setBpmRange: (bpmMin, bpmMax) =>
     set((s) => ({ filters: { ...s.filters, bpmMin, bpmMax } })),

@@ -109,9 +109,16 @@ export function SmartSearch({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlight((h) => (h <= 0 ? items.length - 1 : h - 1));
-    } else if (e.key === 'Enter' && highlight >= 0) {
-      e.preventDefault();
-      choose(items[highlight].apply);
+    } else if (e.key === 'Enter') {
+      // Enter always dismisses the panel. It used to be gated on a highlighted
+      // row, so typing a query and pressing Enter — the common case — hit no
+      // branch at all and left the suggestions covering the results.
+      if (highlight >= 0) {
+        e.preventDefault();
+        choose(items[highlight].apply);
+      } else {
+        setOpen(false);
+      }
     }
   };
 
