@@ -18,6 +18,7 @@ import { WaveformViewer } from "./WaveformViewer";
 import { MidiViewer } from "./MidiViewer";
 import { DawBadge } from "./DawBadge";
 import { PackCover } from "./PackCover";
+import { DawIcon, hasDawIcon } from "./DawIcon";
 import { usePlayerStore } from "../../stores/playerStore";
 import { assetService } from "../../services/assetService";
 import { projectService } from "../../services/projectService";
@@ -242,6 +243,14 @@ export const AssetRow = memo(function AssetRow({
     return parts.join("/") || null;
   })();
 
+  // A project row leads with its DAW's mark instead of generic folder art —
+  // which program a file opens in is the thing you scan this list for. It is
+  // shown once: the DAW column keeps the lettered badge only for the DAWs
+  // that have no mark.
+  const projectDaw =
+    asset.type === "project" ? ((asset.meta as ProjectMeta | undefined)?.daw ?? null) : null;
+  const showsDawIcon = hasDawIcon(projectDaw);
+
   const goToFolder = () => {
     if (packRoot) {
       setPathPrefix(packRoot);
@@ -438,7 +447,17 @@ export const AssetRow = memo(function AssetRow({
           title={`Go to ${asset.packName ?? "pack folder"}`}
           aria-label="Go to pack folder"
         >
-          <PackCover packRoot={packRoot} packName={asset.packName} size={compact ? 28 : 42} />
+          {showsDawIcon ? (
+            <span
+              className="flex items-center justify-center rounded-md bg-gray-800"
+              style={{ width: compact ? 28 : 42, height: compact ? 28 : 42 }}
+              title={projectDaw ?? undefined}
+            >
+              <DawIcon daw={projectDaw} size={compact ? 16 : 22} />
+            </span>
+          ) : (
+            <PackCover packRoot={packRoot} packName={asset.packName} size={compact ? 28 : 42} />
+          )}
         </button>
 
         {/* Play / Open */}
@@ -531,7 +550,7 @@ export const AssetRow = memo(function AssetRow({
           /* Projects: DAW + Date */
           <>
             <div className="flex flex-1 items-center justify-center gap-2">
-              <DawBadge meta={asset.meta as ProjectMeta} />
+              {!showsDawIcon && <DawBadge meta={asset.meta as ProjectMeta} />}
             </div>
             <div
               className="mono shrink-0 text-right text-xs sm:text-sm text-gray-500"

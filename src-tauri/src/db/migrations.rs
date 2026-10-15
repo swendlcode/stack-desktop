@@ -225,6 +225,33 @@ CREATE INDEX IF NOT EXISTS idx_assets_live_space      ON assets(space)        WH
 CREATE INDEX IF NOT EXISTS idx_assets_live_role       ON assets(role)         WHERE index_status != 'missing';
 "#,
 ),
+(
+    "013_loop_type_column",
+    // `subtype` was carrying two unrelated ideas: whether a sample is a loop
+    // or a one-shot, and what the sound is (kick, snare, riser). The token
+    // scan is first-match-wins, so `KICK_loop_128.wav` resolved to "kick" and
+    // the loop signal was thrown away — only 17% of a real 90k library ever
+    // got a loop/oneshot value, which made the One-Shots & Loops filter look
+    // broken. `loop_type` holds that one distinction on its own.
+    r#"
+ALTER TABLE assets ADD COLUMN loop_type TEXT;
+CREATE INDEX IF NOT EXISTS idx_assets_live_loop_type ON assets(loop_type) WHERE index_status != 'missing';
+
+-- Migration 012's partial indexes are keyed on the facet column alone, so as
+-- soon as a type tab is selected (the normal case) the planner preferred
+-- idx_assets_type and fell back to a temp B-tree for the GROUP BY: ~35ms per
+-- facet branch, and there are eight of them. Leading with `type` lets each
+-- branch seek instead -- the instrument branch drops from 34ms to 0.07ms.
+CREATE INDEX IF NOT EXISTS idx_facet_type_instrument ON assets(type, instrument)   WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_facet_type_subtype    ON assets(type, subtype)      WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_facet_type_loop_type  ON assets(type, loop_type)    WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_facet_type_genre      ON assets(type, genre)        WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_facet_type_energy     ON assets(type, energy_level) WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_facet_type_texture    ON assets(type, texture)      WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_facet_type_space      ON assets(type, space)        WHERE index_status != 'missing';
+CREATE INDEX IF NOT EXISTS idx_facet_type_role       ON assets(type, role)         WHERE index_status != 'missing';
+"#,
+),
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {

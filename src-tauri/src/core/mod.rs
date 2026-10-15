@@ -2,6 +2,7 @@ pub mod artwork_cleanup;
 pub mod genre_backfill;
 pub mod hasher;
 pub mod indexer;
+pub mod loop_type_backfill;
 pub mod plugins;
 pub mod reconciler;
 pub mod scanner;

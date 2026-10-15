@@ -1,4 +1,16 @@
 {
+  "1.0.24": {
+    "date": "2026-10-15",
+    "title": "One-shots and loops, sorted out",
+    "summary": "Filtering by One-Shots or Loops now covers your whole library instead of a fraction of it.",
+    "highlights": [
+      "Nearly every sample is now marked as a one-shot or a loop \u2014 the filter used to recognize about one in six.",
+      "Kick, snare, hat, clap and the rest appear in the Instruments list, so you can narrow to a sound in one click.",
+      "Folder names like \u201cone-shots\u201d no longer turn up as instruments.",
+      "FL Studio and Ableton projects show their own icon in the list.",
+      "Drag a sample onto Favorites, or onto one of your favorite folders, to file it."
+    ]
+  },
   "1.0.23": {
     "date": "2026-10-08",
     "title": "Search that answers what you asked",
@@ -27,7 +39,7 @@
     "title": "Playback keeps going while you browse",
     "summary": "A playing sample no longer stops when you search, open another pack, or switch tabs.",
     "highlights": [
-      "Audition a sample and keep browsing — searching, changing pack or switching tabs no longer cuts it off.",
+      "Audition a sample and keep browsing \u2014 searching, changing pack or switching tabs no longer cuts it off.",
       "A dropped connection while checking a file no longer stops what you are listening to."
     ]
   },
@@ -49,7 +61,7 @@
     "title": "QR code fix",
     "summary": "The Web access QR code was cut off, and the section had more explaining than it needed.",
     "highlights": [
-      "Fixed the QR code being clipped — it now scales to fit and scans properly.",
+      "Fixed the QR code being clipped \u2014 it now scales to fit and scans properly.",
       "Trimmed the wording in Web access settings."
     ]
   },
@@ -65,11 +77,11 @@
   "1.0.17": {
     "date": "2026-09-24",
     "title": "Browse your library from any device",
-    "summary": "Open Stack in a browser on your phone, tablet or another computer on the same network — with a new Web access section in Settings that gives you the exact link to use.",
+    "summary": "Open Stack in a browser on your phone, tablet or another computer on the same network \u2014 with a new Web access section in Settings that gives you the exact link to use.",
     "highlights": [
       "New Web access section in Settings: turn browsing on or off, pick the port, and copy the link.",
       "Optionally allow other devices on your network, so you can browse and audition your library from a phone, tablet or laptop.",
-      "Links are protected by an access token, so only someone with your link can reach your library. Opening the link once is enough — the browser remembers it.",
+      "Links are protected by an access token, so only someone with your link can reach your library. Opening the link once is enough \u2014 the browser remembers it.",
       "The link for other devices shows your computer's network address, so there is no guessing at IP addresses.",
       "Turning network access on or off applies immediately, without restarting Stack.",
       "README now explains browser access, and answers the Docker question: Stack is a desktop app and cannot run in a container, but browser access covers the same use case."
@@ -77,25 +89,25 @@
   },
   "1.0.16": {
     "date": "2026-09-24",
-    "title": "Artwork fixes — and Stack stops touching your folders",
+    "title": "Artwork fixes \u2014 and Stack stops touching your folders",
     "summary": "Covers show up again, your macOS folder icons are used as artwork, and Stack no longer rewrites the icons of every subfolder inside a pack.",
     "highlights": [
       "Fixed pack and project covers showing as a broken image.",
-      "Stack no longer changes the Finder icon of every subfolder inside a pack. Setting one cover used to copy the image into every folder below it and rebrand each one — in one project that was 27 copies of the same image, 61MB, across 64 folders.",
+      "Stack no longer changes the Finder icon of every subfolder inside a pack. Setting one cover used to copy the image into every folder below it and rebrand each one \u2014 in one project that was 27 copies of the same image, 61MB, across 64 folders.",
       "Subfolders still show their pack's artwork, but nothing is written into them any more.",
       "A one-time cleanup runs on this update: it removes those duplicate copies and restores the folder icons Stack changed, keeping the cover you actually chose.",
       "If you set a custom folder icon in macOS Get Info, Stack now uses it as that pack's artwork.",
-      "Removing artwork no longer deletes a folder icon you set yourself — it only clears the one Stack applied."
+      "Removing artwork no longer deletes a folder icon you set yourself \u2014 it only clears the one Stack applied."
     ]
   },
   "1.0.15": {
     "date": "2026-09-24",
     "title": "Updates inside the app & a playback fix",
-    "summary": "Stack now updates itself — no more trips to the website — and audio no longer goes silent after the app has been sitting in the background.",
+    "summary": "Stack now updates itself \u2014 no more trips to the website \u2014 and audio no longer goes silent after the app has been sitting in the background.",
     "highlights": [
       "Updates install from inside Stack: it downloads in the background while you keep working, then applies on a single Restart click.",
       "This is the last version you will need to download by hand. From here on, updates arrive in the app automatically.",
-      "Fixed audio going silent after Stack had been open in the background for a long time — macOS was interrupting the audio engine and it never recovered. It now reconnects on its own when you come back to the app."
+      "Fixed audio going silent after Stack had been open in the background for a long time \u2014 macOS was interrupting the audio engine and it never recovered. It now reconnects on its own when you come back to the app."
     ]
   },
   "1.0.14": {
@@ -103,14 +115,14 @@
     "title": "Smarter search, genre filtering & a much faster browser",
     "summary": "Search now forgives typos and suggests what your library actually contains, genres are detected and filterable for the first time, and browsing a large library is dramatically faster.",
     "highlights": [
-      "Search understands typos — look for \"vocalz\" or \"guitr\" and Stack finds vocals and guitars, using the real words in your own library.",
+      "Search understands typos \u2014 look for \"vocalz\" or \"guitr\" and Stack finds vocals and guitars, using the real words in your own library.",
       "Suggestions as you type, popular searches when the box is empty, and a helpful panel instead of a blank page when nothing matches.",
-      "New Genre filter — Stack detects genres from your folder structure, so house, future bass, techno and more are filterable out of the box.",
+      "New Genre filter \u2014 Stack detects genres from your folder structure, so house, future bass, techno and more are filterable out of the box.",
       "Instruments and Genres are proper multi-select lists with live counts, and a filter box when the list is long.",
       "New One-Shots & Loops filter.",
-      "Redesigned key picker with flat and sharp layouts — and keys now match regardless of whether a pack spells a note Db or C#.",
+      "Redesigned key picker with flat and sharp layouts \u2014 and keys now match regardless of whether a pack spells a note Db or C#.",
       "One search bar instead of two: the browser toolbar duplicate is gone, and the main one no longer falls out of sync.",
-      "MIDI previews sound like a real instrument — richer, fuller and far louder, especially on chords. The piano roll now follows your theme and accent colour.",
+      "MIDI previews sound like a real instrument \u2014 richer, fuller and far louder, especially on chords. The piano roll now follows your theme and accent colour.",
       "Filtering is around 10x faster, opening a folder is effectively instant, and scrolling long lists is much smoother.",
       "Samples show a pointer cursor, and the shuffle and sort controls were tidied up."
     ]
@@ -120,22 +132,22 @@
     "title": "Compact view, custom columns & Intel Mac support",
     "summary": "Browse big libraries faster with a compact list view and columns you choose yourself, your sort order now survives restarts, and Stack finally runs on Intel Macs.",
     "highlights": [
-      "Intel Mac support — the macOS download is now a universal build that runs on both Apple Silicon and Intel.",
-      "Compact list view — denser rows that fit far more samples on screen. Toggle it in Settings or from the column header.",
-      "Choose your columns — right-click the column header to show or hide Waveform, Time, Key, BPM and the new Folder column.",
+      "Intel Mac support \u2014 the macOS download is now a universal build that runs on both Apple Silicon and Intel.",
+      "Compact list view \u2014 denser rows that fit far more samples on screen. Toggle it in Settings or from the column header.",
+      "Choose your columns \u2014 right-click the column header to show or hide Waveform, Time, Key, BPM and the new Folder column.",
       "New Folder column shows where each sample lives, and clicking it jumps straight to that folder.",
-      "Your sort order is remembered between sessions — no more resetting to Most Recent on every launch.",
+      "Your sort order is remembered between sessions \u2014 no more resetting to Most Recent on every launch.",
       "Sorting by Name now starts A to Z, and Most Recent starts newest first.",
-      "Click a folder in the sidebar to open and expand it — no need to hit the small arrow. Expanded folders are remembered too.",
+      "Click a folder in the sidebar to open and expand it \u2014 no need to hit the small arrow. Expanded folders are remembered too.",
       "Fixed column headers showing Waveform, Key or BPM labels when those columns were turned off."
     ]
   },
   "1.0.12": {
     "date": "2026-08-22",
     "title": "Click-to-play samples & cover fixes",
-    "summary": "Audition samples by clicking anywhere on a row, jump straight to a spot in the waveform, and pack covers now save reliably — including drag-and-drop from Finder.",
+    "summary": "Audition samples by clicking anywhere on a row, jump straight to a spot in the waveform, and pack covers now save reliably \u2014 including drag-and-drop from Finder.",
     "highlights": [
-      "Click anywhere on a sample row to play it — no need to aim for the play button.",
+      "Click anywhere on a sample row to play it \u2014 no need to aim for the play button.",
       "Click a point on any waveform to start playing from exactly there, even if that sample isn't playing yet.",
       "Fixed the list jumping when clicking samples near the bottom or top of the view.",
       "Pack cover: dragging an image from Finder onto the cover editor now works.",
@@ -145,25 +157,25 @@
   "1.0.11": {
     "date": "2026-08-05",
     "title": "Plugins page: search & table view",
-    "summary": "The Plugins page now reads like a proper table — aligned columns with a header row — and has instant search across plugin names, vendors, and paths.",
+    "summary": "The Plugins page now reads like a proper table \u2014 aligned columns with a header row \u2014 and has instant search across plugin names, vendors, and paths.",
     "highlights": [
       "Search your plugins instantly by name, vendor, or install path.",
-      "New table layout with a column header — Format, Name, Vendor, Path, Size, and Type line up in proper grid rows.",
+      "New table layout with a column header \u2014 Format, Name, Vendor, Path, Size, and Type line up in proper grid rows.",
       "The plugin counter shows how many match your current search and filter."
     ]
   },
   "1.0.10": {
     "date": "2026-08-05",
     "title": "Plugin manager: smart uninstall & Windows support",
-    "summary": "The Plugins page now finds every plugin automatically — VST, VST3, AU, CLAP and AAX on macOS and Windows — and can fully uninstall a plugin, sweeping up presets, preferences, caches and other leftovers.",
+    "summary": "The Plugins page now finds every plugin automatically \u2014 VST, VST3, AU, CLAP and AAX on macOS and Windows \u2014 and can fully uninstall a plugin, sweeping up presets, preferences, caches and other leftovers.",
     "highlights": [
-      "Delete any plugin right from the Plugins page — Stack finds its leftovers (presets, preferences, caches, vendor data, even iCloud copies) and shows exactly what will be removed before anything is touched.",
-      "Deleting one format offers the others too — remove the VST3 and the AU / VST / AAX copies of the same plugin can go with it.",
+      "Delete any plugin right from the Plugins page \u2014 Stack finds its leftovers (presets, preferences, caches, vendor data, even iCloud copies) and shows exactly what will be removed before anything is touched.",
+      "Deleting one format offers the others too \u2014 remove the VST3 and the AU / VST / AAX copies of the same plugin can go with it.",
       "Files in system folders are removed with a single administrator prompt.",
       "CLAP and AAX plugins are now detected alongside VST, VST3 and AU.",
-      "Full Windows support — all standard folders plus the registry-configured VST2 path are scanned, and registry leftovers are cleaned up on uninstall.",
+      "Full Windows support \u2014 all standard folders plus the registry-configured VST2 path are scanned, and registry leftovers are cleaned up on uninstall.",
       "Plugin rows now show vendor, size on disk, and which other formats are installed.",
-      "No more folder hunting — every standard plugin location is scanned out of the box; extra folders moved to Settings → Plugins."
+      "No more folder hunting \u2014 every standard plugin location is scanned out of the box; extra folders moved to Settings \u2192 Plugins."
     ]
   },
   "1.0.9": {
@@ -171,12 +183,12 @@
     "title": "Massive indexing & search speed-up",
     "summary": "A ground-up performance pass for huge libraries: indexing is over 15x faster, search runs on a real full-text index, and duplicate samples no longer vanish from your packs.",
     "highlights": [
-      "Indexing overhaul — a 290GB library with 164,000 files now indexes in about 2 minutes instead of 30+.",
-      "Instant search — queries hit a full-text index instead of scanning every entry, so results stay snappy even in six-figure libraries.",
-      "Duplicate samples fixed — byte-identical files in different packs each keep their own entry instead of silently replacing each other.",
+      "Indexing overhaul \u2014 a 290GB library with 164,000 files now indexes in about 2 minutes instead of 30+.",
+      "Instant search \u2014 queries hit a full-text index instead of scanning every entry, so results stay snappy even in six-figure libraries.",
+      "Duplicate samples fixed \u2014 byte-identical files in different packs each keep their own entry instead of silently replacing each other.",
       "Killed the hidden re-index loop that made Stack re-process thousands of duplicated files on every launch.",
       "Browsing and deep scrolling are dramatically faster thanks to a new sort index.",
-      "Lower memory use while indexing — huge DAW project files no longer spike RAM.",
+      "Lower memory use while indexing \u2014 huge DAW project files no longer spike RAM.",
       "Ableton .als project info is now read correctly."
     ]
   },
@@ -185,11 +197,11 @@
     "title": "Favorites folders & drag-to-organize",
     "summary": "Organize your favorites into colorful folders and file samples away with a single drag.",
     "highlights": [
-      "New Favorites folders — create, rename, and color them right from the Favorites page.",
-      "Drag any sample, MIDI, or preset onto a folder (from Browser, MIDI, Presets, or Favorites) to file it away — it's favorited automatically.",
+      "New Favorites folders \u2014 create, rename, and color them right from the Favorites page.",
+      "Drag any sample, MIDI, or preset onto a folder (from Browser, MIDI, Presets, or Favorites) to file it away \u2014 it's favorited automatically.",
       "Drag multiple selected samples into a folder at once.",
       "Favorites is now expandable in the sidebar, with a live file count on every folder.",
-      "Give each folder its own color — pick from the palette or choose any custom color.",
+      "Give each folder its own color \u2014 pick from the palette or choose any custom color.",
       "Fixed scrolling on the Favorites, MIDI, and Presets pages."
     ]
   },
@@ -198,7 +210,7 @@
     "title": "Custom themes & window controls",
     "summary": "Make Stack yours with custom accent themes and refined window controls.",
     "highlights": [
-      "Custom themes — set your own accent color across the whole app.",
+      "Custom themes \u2014 set your own accent color across the whole app.",
       "Open samples in your browser for a quick listen.",
       "Custom window controls for a cleaner, more native feel."
     ]

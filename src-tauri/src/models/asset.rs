@@ -21,6 +21,8 @@ pub struct Asset {
 
     pub instrument: Option<String>,
     pub subtype: Option<String>,
+    /// "loop" | "oneshot" | None — see `metadata::loop_type`.
+    pub loop_type: Option<String>,
     pub genre: Option<String>,
 
     pub is_favorite: bool,
@@ -74,6 +76,8 @@ pub struct AssetFilters {
     pub instruments: Vec<String>,
     #[serde(default)]
     pub subtypes: Vec<String>,
+    #[serde(default)]
+    pub loop_types: Vec<String>,
     #[serde(default)]
     pub genres: Vec<String>,
     pub bpm_min: Option<f32>,
@@ -148,6 +152,7 @@ pub struct FacetCount {
 pub struct FacetCounts {
     pub instruments: Vec<FacetCount>,
     pub subtypes: Vec<FacetCount>,
+    pub loop_types: Vec<FacetCount>,
     pub genres: Vec<FacetCount>,
     pub energy_levels: Vec<FacetCount>,
     pub textures: Vec<FacetCount>,

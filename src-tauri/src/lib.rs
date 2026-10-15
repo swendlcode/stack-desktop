@@ -273,11 +273,16 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let result = tauri::async_runtime::spawn_blocking(move || {
+                        let mut did_work: Option<usize> = None;
                         if crate::core::genre_backfill::needs_rebuild(&pool)? {
-                            crate::core::genre_backfill::run(&pool).map(Some)
-                        } else {
-                            Ok(None)
+                            did_work = crate::core::genre_backfill::run(&pool).map(Some)?;
                         }
+                        // Migration 013: fill loop_type and drop the folder
+                        // names that were masquerading as instruments.
+                        if crate::core::loop_type_backfill::needs_backfill(&pool)? {
+                            did_work = crate::core::loop_type_backfill::run(&pool).map(Some)?;
+                        }
+                        crate::error::Result::Ok(did_work)
                     })
                     .await;
                     match result {

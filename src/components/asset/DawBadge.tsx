@@ -1,4 +1,5 @@
 import { Badge } from '../ui/Badge';
+import { DawIcon, hasDawIcon } from './DawIcon';
 import type { ProjectMeta } from '../../types/asset';
 
 interface DawBadgeProps {
@@ -42,11 +43,26 @@ export function DawBadge({ meta, className }: DawBadgeProps) {
   const daw = meta.daw || 'Unknown DAW';
   const abbreviation = DAW_ABBREVIATIONS[daw] || daw;
   const colorClass = DAW_COLORS[daw] || 'bg-gray-500/10 text-gray-400 border-gray-500/20';
+  const title = `${daw}${meta.version ? ` ${meta.version}` : ''}`;
+
+  // Where the DAW has a usable mark, it says which program this opens in
+  // faster than two letters do. The rest keep the lettering.
+  if (hasDawIcon(daw)) {
+    return (
+      <span
+        className={`inline-flex shrink-0 items-center ${className || ''}`}
+        title={title}
+        aria-label={title}
+      >
+        <DawIcon daw={daw} size={14} />
+      </span>
+    );
+  }
 
   return (
-    <Badge 
+    <Badge
       className={`${colorClass} ${className || ''}`}
-      title={`${daw}${meta.version ? ` ${meta.version}` : ''}`}
+      title={title}
     >
       {abbreviation}
     </Badge>

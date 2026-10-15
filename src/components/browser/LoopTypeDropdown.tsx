@@ -10,14 +10,17 @@ const OPTIONS = [
 ] as const;
 
 export function LoopTypeDropdown() {
-  const subtypes = useFilterStore((s) => s.filters.subtypes);
-  const setFilters = useFilterStore((s) => s.setSubtypes);
+  // Reads `loopTypes`, not `subtypes`. The distinction used to share the
+  // subtype column with kick/snare/riser, where a first-match-wins token scan
+  // meant only 17% of a real library ever carried it (issue #11).
+  const loopTypes = useFilterStore((s) => s.filters.loopTypes);
+  const setFilters = useFilterStore((s) => s.setLoopTypes);
   const { data: facets } = useFacetCounts();
 
   const countFor = (value: string) =>
-    facets?.subtypes.find((f) => f.value === value)?.count ?? 0;
+    facets?.loopTypes.find((f) => f.value === value)?.count ?? 0;
 
-  const selected = OPTIONS.find((o) => subtypes.includes(o.value))?.value ?? null;
+  const selected = OPTIONS.find((o) => loopTypes.includes(o.value))?.value ?? null;
   const isActive = selected !== null;
   const label = isActive
     ? (OPTIONS.find((o) => o.value === selected)?.label ?? 'One-Shots & Loops')
@@ -25,8 +28,7 @@ export function LoopTypeDropdown() {
 
   // Picking one clears the other; picking the selected one clears the filter.
   const pick = (value: string) => {
-    const others = subtypes.filter((s) => !OPTIONS.some((o) => o.value === s));
-    setFilters(selected === value ? others : [...others, value]);
+    setFilters(selected === value ? [] : [value]);
   };
 
   return (
@@ -66,7 +68,7 @@ export function LoopTypeDropdown() {
           <DropdownDivider />
           <DropdownActions>
             <button
-              onClick={() => setFilters(subtypes.filter((s) => !OPTIONS.some((o) => o.value === s)))}
+              onClick={() => setFilters([])}
               className="rounded-lg px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-stack-white"
             >
               Clear

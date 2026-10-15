@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::core::{hasher, scanner};
 use crate::db::{AssetRepository, DatabasePool, PackRepository};
 use crate::error::Result;
-use crate::metadata::{filename_parser, midi_parser, path_parser, preset_parser, project_parser};
+use crate::metadata::{filename_parser, loop_type, midi_parser, path_parser, preset_parser, project_parser};
 use crate::models::{Asset, Pack, ScanProgress};
 
 /// How often the indexer emits a progress event to the frontend.
@@ -620,6 +620,27 @@ impl Indexer {
             _ => {}
         }
 
+        // Loop vs one-shot is decided on its own, not taken from `subtype` —
+        // the token scan is first-match-wins, so `KICK_loop_128.wav` resolved
+        // to "kick" and the loop signal was lost (issue #11).
+        let parent_dirs: Vec<String> = job
+            .path
+            .parent()
+            .map(|d| {
+                d.components()
+                    .rev()
+                    .take(4)
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let loop_type_value = if asset_type == "sample" {
+            loop_type::classify(&filename, &parent_dirs, eff_bpm, duration_ms)
+                .map(|t| t.as_str().to_string())
+        } else {
+            None
+        };
+
         let asset = Asset {
             id: id.clone(),
             path: path_str,
@@ -636,6 +657,7 @@ impl Indexer {
             channels,
             instrument: instrument.clone(),
             subtype: subtype.clone(),
+            loop_type: loop_type_value,
             genre: genre.clone(),
             is_favorite: false,
             user_tags: vec![],

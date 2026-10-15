@@ -19,6 +19,7 @@ interface FilterStore {
   toggleInstrument: (instrument: string) => void;
   toggleSubtype: (subtype: string) => void;
   setSubtypes: (subtypes: string[]) => void;
+  setLoopTypes: (loopTypes: string[]) => void;
   toggleGenre: (genre: string) => void;
   clearGenres: () => void;
   toggleFavoritesOnly: () => void;
@@ -141,6 +142,8 @@ export const useFilterStore = create<FilterStore>((set) => ({
     })),
 
   setSubtypes: (subtypes) => set((s) => ({ filters: { ...s.filters, subtypes } })),
+
+  setLoopTypes: (loopTypes) => set((s) => ({ filters: { ...s.filters, loopTypes } })),
 
   toggleSubtype: (subtype) =>
     set((s) => ({

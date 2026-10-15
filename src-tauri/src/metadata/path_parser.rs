@@ -117,13 +117,10 @@ const CATEGORY_MAP: &[(&str, &str)] = &[
     ("transitions", "fx"),
     ("lasers", "fx"),
     ("noises", "fx"),
-    // ── One-shots / loops ────────────────────────────────────────────────
-    ("one_shots", "one_shot"),
-    ("one shots", "one_shot"),
-    ("oneshots", "one_shot"),
-    ("loops", "loop"),
-    ("midi", "midi"),
-    ("presets", "preset"),
+    // A folder called "One Shots", "Loops", "MIDI" or "Presets" says how the
+    // files are packaged, not what instrument they are. Mapping them here put
+    // an instrument called "one-shots" in the filter list (issue #11). Loop
+    // vs one-shot now has its own column; see `metadata::loop_type`.
     // ── Bass ──────────────────────────────────────────────────────────────
     ("bass", "bass"),
     // ── Synths / melodic ─────────────────────────────────────────────────

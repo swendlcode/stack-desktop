@@ -4,6 +4,7 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { usePacks } from '../../hooks/usePacks';
 import { assetService } from '../../services/assetService';
 import { PackCover } from '../asset/PackCover';
+import { DawIcon, hasDawIcon } from '../asset/DawIcon';
 import { PackDescription } from '../library/PackDescription';
 import { CoverEditorModal } from '../library/CoverEditorModal';
 import { Button } from '../ui/Button';
@@ -42,6 +43,7 @@ export function ProjectHero({ pathPrefix }: Props) {
           packIds: [],
           instruments: [],
           subtypes: [],
+          loopTypes: [],
       genres: [],
           bpmMin: null,
           bpmMax: null,
@@ -144,8 +146,8 @@ function ChipRow({
   meta: { keyNote: string | null; keyScale: string | null; altKeyNote: string | null; altKeyScale: string | null; bpm: number | null; deadline: string | null } | null;
   dawLabel: string | null;
 }) {
-  const chips: { label: string; tone?: 'urgent' | 'soon' | 'muted' }[] = [];
-  if (dawLabel) chips.push({ label: dawLabel, tone: 'muted' });
+  const chips: { label: string; tone?: 'urgent' | 'soon' | 'muted'; daw?: string }[] = [];
+  if (dawLabel) chips.push({ label: dawLabel, tone: 'muted', daw: dawLabel });
   if (meta?.keyNote) {
     chips.push({ label: `${meta.keyNote}${scaleSuffix(meta.keyScale)}` });
   }
@@ -177,6 +179,9 @@ function ChipRow({
           }`}
           title={c.label === formatDeadlineRelative(meta?.deadline ?? '') && meta?.deadline ? formatDeadline(meta.deadline) : undefined}
         >
+          {c.daw && hasDawIcon(c.daw) && (
+            <DawIcon daw={c.daw} size={12} className="mr-1.5 inline-block align-[-1px]" />
+          )}
           {c.label}
         </span>
       ))}

@@ -1,5 +1,6 @@
 pub mod audio_analyzer;
 pub mod filename_parser;
+pub mod loop_type;
 pub mod midi_parser;
 pub mod path_parser;
 pub mod preset_parser;

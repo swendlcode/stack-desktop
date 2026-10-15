@@ -24,6 +24,7 @@ export interface SearchSuggestions {
 export interface FacetCounts {
   instruments: FacetCount[];
   subtypes: FacetCount[];
+  loopTypes: FacetCount[];
   genres: FacetCount[];
   energyLevels: FacetCount[];
   textures: FacetCount[];

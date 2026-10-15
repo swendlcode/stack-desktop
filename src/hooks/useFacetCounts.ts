@@ -5,6 +5,7 @@ import { assetService, type FacetCounts } from '../services/assetService';
 export const EMPTY_FACETS: FacetCounts = {
   instruments: [],
   subtypes: [],
+  loopTypes: [],
   genres: [],
   energyLevels: [],
   textures: [],

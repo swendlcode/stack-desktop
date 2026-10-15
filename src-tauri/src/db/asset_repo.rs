@@ -77,6 +77,7 @@ impl AssetRepository {
         let mut textures: Vec<FacetCount> = Vec::new();
         let mut spaces: Vec<FacetCount> = Vec::new();
         let mut roles: Vec<FacetCount> = Vec::new();
+        let mut loop_types: Vec<FacetCount> = Vec::new();
 
         let rows = stmt.query_map(params_from_iter(q.params.iter()), |r| {
             let facet: String = r.get(0)?;
@@ -95,8 +96,24 @@ impl AssetRepository {
                 "texture" => textures.push(fc),
                 "space" => spaces.push(fc),
                 "role" => roles.push(fc),
+                "loop_type" => loop_types.push(fc),
                 _ => {}
             }
+        }
+
+        // The Instrument facet is fed by two branches — the `instrument`
+        // column and the sound-naming half of `subtype` — so a value that
+        // exists in both (bass, lead, pad, chord) arrives twice and has to be
+        // summed, not listed twice.
+        {
+            let mut merged: Vec<FacetCount> = Vec::with_capacity(instruments.len());
+            for fc in instruments.drain(..) {
+                match merged.iter_mut().find(|m| m.value == fc.value) {
+                    Some(m) => m.count += fc.count,
+                    None => merged.push(fc),
+                }
+            }
+            instruments = merged;
         }
 
         // Each facet was previously ORDER BY cnt DESC inside its own query.
@@ -109,11 +126,12 @@ impl AssetRepository {
             &mut textures,
             &mut spaces,
             &mut roles,
+            &mut loop_types,
         ] {
             v.sort_by_key(|c| std::cmp::Reverse(c.count));
         }
 
-        Ok(FacetCounts { instruments, subtypes, genres, energy_levels, textures, spaces, roles })
+        Ok(FacetCounts { instruments, subtypes, loop_types, genres, energy_levels, textures, spaces, roles })
     }
 
     pub fn search_raw(
@@ -137,7 +155,7 @@ impl AssetRepository {
         let mut stmt = conn.prepare(
             "SELECT id, path, filename, extension, type, pack_id, pack_name, \
              bpm, key_note, key_scale, duration_ms, sample_rate, channels, bit_depth, \
-             instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
+             instrument, subtype, loop_type, is_favorite, user_tags, play_count, last_played, rating, \
              meta, index_status, bpm_source, key_source, waveform_data, \
              energy_level, texture, space, role, \
              created_at, updated_at, genre \
@@ -178,11 +196,11 @@ impl AssetRepository {
             let mut upsert_stmt = tx.prepare_cached(
                 "INSERT INTO assets (id, path, filename, extension, type, pack_id, pack_name, \
                  bpm, key_note, key_scale, duration_ms, sample_rate, channels, \
-                 instrument, subtype, genre, is_favorite, user_tags, play_count, meta, \
+                 instrument, subtype, loop_type, genre, is_favorite, user_tags, play_count, meta, \
                  index_status, bpm_source, key_source, waveform_data, \
                  energy_level, texture, space, role, content_hash, \
                  created_at, updated_at, last_seen_at) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33) \
                  ON CONFLICT(path) DO UPDATE SET \
                     filename = excluded.filename, pack_id = excluded.pack_id, \
                     pack_name = excluded.pack_name, bpm = COALESCE(excluded.bpm, assets.bpm), \
@@ -193,6 +211,7 @@ impl AssetRepository {
                     channels = COALESCE(excluded.channels, assets.channels), \
                     instrument = COALESCE(excluded.instrument, assets.instrument), \
                     subtype = COALESCE(excluded.subtype, assets.subtype), \
+                    loop_type = COALESCE(excluded.loop_type, assets.loop_type), \
                     genre = COALESCE(excluded.genre, assets.genre), \
                     meta = excluded.meta, index_status = excluded.index_status, \
                     bpm_source = COALESCE(excluded.bpm_source, assets.bpm_source), \
@@ -214,6 +233,7 @@ impl AssetRepository {
                     channels = COALESCE(excluded.channels, assets.channels), \
                     instrument = COALESCE(excluded.instrument, assets.instrument), \
                     subtype = COALESCE(excluded.subtype, assets.subtype), \
+                    loop_type = COALESCE(excluded.loop_type, assets.loop_type), \
                     genre = COALESCE(excluded.genre, assets.genre), \
                     meta = excluded.meta, index_status = excluded.index_status, \
                     bpm_source = COALESCE(excluded.bpm_source, assets.bpm_source), \
@@ -265,6 +285,7 @@ impl AssetRepository {
                     asset.channels,
                     asset.instrument,
                     asset.subtype,
+                    asset.loop_type,
                     asset.genre,
                     asset.is_favorite as i64,
                     tags,
@@ -751,7 +772,7 @@ impl AssetRepository {
         let sql = format!(
             "SELECT id, path, filename, extension, type, pack_id, pack_name, \
              bpm, key_note, key_scale, duration_ms, sample_rate, channels, bit_depth, \
-             instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
+             instrument, subtype, loop_type, is_favorite, user_tags, play_count, last_played, rating, \
              meta, index_status, bpm_source, key_source, NULL AS waveform_data, \
              energy_level, texture, space, role, \
              created_at, updated_at, genre, \
@@ -779,7 +800,7 @@ impl AssetRepository {
         let mut stmt = conn.prepare(
             "SELECT id, path, filename, extension, type, pack_id, pack_name, \
              bpm, key_note, key_scale, duration_ms, sample_rate, channels, bit_depth, \
-             instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
+             instrument, subtype, loop_type, is_favorite, user_tags, play_count, last_played, rating, \
              meta, index_status, bpm_source, key_source, NULL AS waveform_data, \
              energy_level, texture, space, role, \
              created_at, updated_at, genre \
@@ -811,19 +832,19 @@ impl AssetRepository {
 }
 
 fn row_to_asset(row: &Row) -> rusqlite::Result<Asset> {
-    let user_tags: String = row.get(17).unwrap_or_else(|_| "[]".into());
+    let user_tags: String = row.get(18).unwrap_or_else(|_| "[]".into());
     let user_tags: Vec<String> = serde_json::from_str(&user_tags).unwrap_or_default();
 
-    let meta: String = row.get(21).unwrap_or_else(|_| "{}".into());
+    let meta: String = row.get(22).unwrap_or_else(|_| "{}".into());
     let meta: serde_json::Value = serde_json::from_str(&meta).unwrap_or(serde_json::Value::Null);
 
-    let waveform: Option<String> = row.get(25).ok();
+    let waveform: Option<String> = row.get(26).ok();
     let waveform_data = waveform.map(|s| waveform_from_str(&s));
 
-    let is_fav: i64 = row.get(16).unwrap_or(0);
+    let is_fav: i64 = row.get(17).unwrap_or(0);
 
-    // Columns 26-29: energy_level, texture, space, role (added in migration 004)
-    // Columns 30-31: created_at, updated_at
+    // Indices follow the SELECT lists above; loop_type sits at 16, so every
+    // column after `subtype` is one further along than before migration 013.
     Ok(Asset {
         id: row.get(0)?,
         path: row.get(1)?,
@@ -840,22 +861,23 @@ fn row_to_asset(row: &Row) -> rusqlite::Result<Asset> {
         channels: row.get(12).ok(),
         instrument: row.get(14).ok(),
         subtype: row.get(15).ok(),
-        genre: row.get(32).ok(),
+        loop_type: row.get(16).ok(),
+        genre: row.get(33).ok(),
         is_favorite: is_fav != 0,
         user_tags,
-        play_count: row.get(18).unwrap_or(0),
-        last_played: row.get(19).ok(),
-        rating: row.get(20).ok(),
+        play_count: row.get(19).unwrap_or(0),
+        last_played: row.get(20).ok(),
+        rating: row.get(21).ok(),
         meta,
-        index_status: row.get(22).unwrap_or_else(|_| "pending".into()),
-        bpm_source: row.get(23).ok(),
-        key_source: row.get(24).ok(),
+        index_status: row.get(23).unwrap_or_else(|_| "pending".into()),
+        bpm_source: row.get(24).ok(),
+        key_source: row.get(25).ok(),
         waveform_data,
-        energy_level: row.get(26).ok(),
-        texture: row.get(27).ok(),
-        space: row.get(28).ok(),
-        role: row.get(29).ok(),
-        created_at: row.get(30).unwrap_or(0),
-        updated_at: row.get(31).unwrap_or(0),
+        energy_level: row.get(27).ok(),
+        texture: row.get(28).ok(),
+        space: row.get(29).ok(),
+        role: row.get(30).ok(),
+        created_at: row.get(31).unwrap_or(0),
+        updated_at: row.get(32).unwrap_or(0),
     })
 }

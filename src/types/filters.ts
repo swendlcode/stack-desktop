@@ -6,6 +6,8 @@ export interface AssetFilters {
   packIds: string[];
   instruments: string[];
   subtypes: string[];
+  /** 'loop' | 'oneshot' — its own dimension, not a subtype. */
+  loopTypes: string[];
   genres: string[];
   bpmMin: number | null;
   bpmMax: number | null;
@@ -37,6 +39,7 @@ export const DEFAULT_FILTERS: AssetFilters = {
   packIds: [],
   instruments: [],
   subtypes: [],
+  loopTypes: [],
   genres: [],
   bpmMin: null,
   bpmMax: null,

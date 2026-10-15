@@ -24,7 +24,7 @@ pub fn build_search(filters: &AssetFilters, sort: &SortOptions, limit: i64, offs
     let mut sql = format!(
         "SELECT id, path, filename, extension, type, pack_id, pack_name, \
          bpm, key_note, key_scale, duration_ms, sample_rate, channels, bit_depth, \
-         instrument, subtype, is_favorite, user_tags, play_count, last_played, rating, \
+         instrument, subtype, loop_type, is_favorite, user_tags, play_count, last_played, rating, \
          meta, index_status, bpm_source, key_source, NULL AS waveform_data, \
          energy_level, texture, space, role, \
          created_at, updated_at, genre \
@@ -70,19 +70,51 @@ pub fn build_count(filters: &AssetFilters) -> AssetQuery {
 /// Result rows: (facet TEXT, value TEXT, count INTEGER), where `facet` is one of
 /// "instrument" | "subtype" | "energy" | "texture" | "space" | "role".
 /// The repository demultiplexes on `facet` to populate FacetCounts.
+/// Subtype values that name a *sound* and so belong in the flat Instrument
+/// list, as opposed to those naming an arrangement role (`hook`, `drop`,
+/// `fill`, `melody`) or a character (`wet`, `punchy`, `tight`), which would
+/// turn the Instrument list back into the junk drawer issue #11 reported.
+///
+/// These are compile-time literals, never user input, so they are inlined
+/// into the SQL rather than bound — it keeps the facet query's parameter
+/// ordering readable.
+const SOUND_SUBTYPES: &[&str] = &[
+    "kick", "snare", "hihat", "clap", "tom", "percussion", "crash", "ride",
+    "cymbal", "shaker", "tambourine", "rimshot", "snap", "808", "sub_bass",
+    "riser", "downlifter", "uplifter", "impact", "sweep", "noise", "foley",
+    "texture", "ambience", "glitch", "stab", "chord", "lead", "pluck", "arp",
+    "pad", "male_vocal", "female_vocal", "chant", "shout", "adlib", "tops",
+];
+
+fn sound_subtype_list() -> String {
+    SOUND_SUBTYPES
+        .iter()
+        .map(|s| format!("'{}'", s))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 pub fn build_facet_counts(filters: &AssetFilters) -> AssetQuery {
     // Each branch needs the where-clause built with its own filter excluded.
     let (w_inst, p_inst) = build_where(&AssetFilters { instruments: vec![], ..filters.clone() });
+    // The flattened half of the Instrument facet is filtered by the same
+    // exclusion as the first half — both are the Instrument dimension.
+    let (w_inst_sub, p_inst_sub) = build_where(&AssetFilters { instruments: vec![], ..filters.clone() });
     let (w_sub, p_sub) = build_where(&AssetFilters { subtypes: vec![], ..filters.clone() });
     let (w_genre, p_genre) = build_where(&AssetFilters { genres: vec![], ..filters.clone() });
     let (w_energy, p_energy) = build_where(&AssetFilters { energy_levels: vec![], ..filters.clone() });
     let (w_texture, p_texture) = build_where(&AssetFilters { textures: vec![], ..filters.clone() });
     let (w_space, p_space) = build_where(&AssetFilters { spaces: vec![], ..filters.clone() });
     let (w_role, p_role) = build_where(&AssetFilters { roles: vec![], ..filters.clone() });
+    let (w_loop, p_loop) = build_where(&AssetFilters { loop_types: vec![], ..filters.clone() });
 
+    let sounds = sound_subtype_list();
     let sql = format!(
         "SELECT 'instrument' AS facet, instrument AS value, COUNT(*) AS cnt FROM assets \
          WHERE 1=1{} AND instrument IS NOT NULL AND instrument != '' GROUP BY instrument \
+         UNION ALL \
+         SELECT 'instrument', subtype, COUNT(*) FROM assets \
+         WHERE 1=1{} AND subtype IN ({sounds}) GROUP BY subtype \
          UNION ALL \
          SELECT 'subtype', subtype, COUNT(*) FROM assets \
          WHERE 1=1{} AND subtype IS NOT NULL AND subtype != '' GROUP BY subtype \
@@ -100,27 +132,34 @@ pub fn build_facet_counts(filters: &AssetFilters) -> AssetQuery {
          WHERE 1=1{} AND space IS NOT NULL AND space != '' GROUP BY space \
          UNION ALL \
          SELECT 'role', role, COUNT(*) FROM assets \
-         WHERE 1=1{} AND role IS NOT NULL AND role != '' GROUP BY role",
-        w_inst, w_sub, w_genre, w_energy, w_texture, w_space, w_role
+         WHERE 1=1{} AND role IS NOT NULL AND role != '' GROUP BY role \
+         UNION ALL \
+         SELECT 'loop_type', loop_type, COUNT(*) FROM assets \
+         WHERE 1=1{} AND loop_type IS NOT NULL AND loop_type != '' GROUP BY loop_type",
+        w_inst, w_inst_sub, w_sub, w_genre, w_energy, w_texture, w_space, w_role, w_loop
     );
 
     // Concatenate params in the same order the WHERE clauses appear in the SQL.
     let mut params = Vec::with_capacity(
         p_inst.len()
+            + p_inst_sub.len()
             + p_sub.len()
             + p_genre.len()
             + p_energy.len()
             + p_texture.len()
             + p_space.len()
-            + p_role.len(),
+            + p_role.len()
+            + p_loop.len(),
     );
     params.extend(p_inst);
+    params.extend(p_inst_sub);
     params.extend(p_sub);
     params.extend(p_genre);
     params.extend(p_energy);
     params.extend(p_texture);
     params.extend(p_space);
     params.extend(p_role);
+    params.extend(p_loop);
 
     AssetQuery { sql, params }
 }
@@ -234,10 +273,20 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
     }
 
     if !filters.instruments.is_empty() {
+        // The Instrument list is flat: it offers both the broad families
+        // (drum, bass, vocal) and the specific sounds under them (kick, snare,
+        // hihat), because a list that only said "drum" gave no way to ask for
+        // kicks. The columns stay hierarchical, so picking "Drums" still
+        // includes every kick — only the facet is flattened.
         let placeholders = vec!["?"; filters.instruments.len()].join(",");
-        sql.push_str(&format!(" AND instrument IN ({})", placeholders));
-        for i in &filters.instruments {
-            params.push(Value::Text(i.clone()));
+        sql.push_str(&format!(
+            " AND (instrument IN ({0}) OR subtype IN ({0}))",
+            placeholders
+        ));
+        for _ in 0..2 {
+            for v in &filters.instruments {
+                params.push(Value::Text(v.clone()));
+            }
         }
     }
 
@@ -246,6 +295,14 @@ fn build_where(filters: &AssetFilters) -> (String, Vec<Value>) {
         sql.push_str(&format!(" AND genre IN ({})", placeholders));
         for g in &filters.genres {
             params.push(Value::Text(g.clone()));
+        }
+    }
+
+    if !filters.loop_types.is_empty() {
+        let placeholders = vec!["?"; filters.loop_types.len()].join(",");
+        sql.push_str(&format!(" AND loop_type IN ({})", placeholders));
+        for t in &filters.loop_types {
+            params.push(Value::Text(t.clone()));
         }
     }
 

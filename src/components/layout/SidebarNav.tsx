@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SidebarFolderRow } from './SidebarFolderRow';
 import { useUiStore, type ActivePage } from '../../stores/uiStore';
 import { useFilterStore } from '../../stores/filterStore';
+import { useStackDropZoneStore } from '../../stores/stackDropZoneStore';
 import { useStacks } from '../../hooks/useStacks';
 import {
   Element3,
@@ -61,6 +62,20 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const [favoritesExpanded, setFavoritesExpanded] = useState(true);
   const navItems = useVisibleNavItems();
 
+  // Favorites itself is a drop target: dragging a sample onto it favourites
+  // the sample without filing it in a folder. Only the folder rows beneath it
+  // were registered before, so a drop on the row itself did nothing.
+  const favoritesRowRef = useRef<HTMLDivElement | null>(null);
+  const registerZone = useStackDropZoneStore((s) => s.registerZone);
+  const unregisterZone = useStackDropZoneStore((s) => s.unregisterZone);
+  useEffect(() => {
+    const el = favoritesRowRef.current;
+    if (!el) return;
+    const key = 'sidebar:favorites-all';
+    registerZone(key, null, el);
+    return () => unregisterZone(key);
+  }, [registerZone, unregisterZone, navItems.length]);
+
   return (
     <nav className="flex flex-col gap-0.5 px-2 pt-1">
       {navItems.map((item) => {
@@ -78,6 +93,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               <div className="-mx-2 my-1.5 border-t border-gray-700" />
             )}
             <div
+              ref={isFavorites ? favoritesRowRef : undefined}
               className={`group flex items-center rounded-md text-sm transition-colors ${
                 rowActive
                   ? 'bg-stack-fire/10 text-stack-fire'
