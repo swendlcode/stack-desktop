@@ -5,6 +5,7 @@ import { useUiStore } from "../../stores/uiStore";
 import { usePlayer } from "../../hooks/usePlayer";
 import { VolumeControl } from "./VolumeControl";
 import { PackCover } from "../asset/PackCover";
+import { NowPlayingWaveform } from "./NowPlayingWaveform";
 import {
   Play,
   Stop,
@@ -367,7 +368,7 @@ export function PlayerBar() {
       )}
 
       {/* ── CENTRE-LEFT: Artwork + name + type ── */}
-      <div className="order-1 flex min-w-0 flex-1 items-center gap-3 md:order-none">
+      <div className="order-1 flex min-w-0 flex-1 items-center gap-3 md:order-none lg:max-w-[22rem]">
         <div className="shrink-0">
           <PackCover
             packRoot={packRoot}
@@ -396,6 +397,21 @@ export function PlayerBar() {
             )}
           </span>
         </div>
+      </div>
+
+      {/* ── CENTRE: waveform of what is playing ──
+          Only for samples, and only from `lg` up, where the bar is wide
+          enough that it is a waveform rather than a smear. Hidden while the
+          editor is open, since its own full-size waveform sits right above.
+
+          The container itself is unconditional: it is what absorbs the bar's
+          free space now that the name block is capped. Rendering it only when
+          a sample is loaded left that space unclaimed, and the key/tempo and
+          volume controls slid leftward whenever nothing was playing. */}
+      <div className="hidden min-w-0 flex-1 items-center lg:flex">
+        {currentAsset?.type === "sample" && !editorOpen && (
+          <NowPlayingWaveform assetId={currentAsset.id} />
+        )}
       </div>
 
       {/* ── CENTRE: Key | BPM ── */}

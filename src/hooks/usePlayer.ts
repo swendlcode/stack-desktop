@@ -173,6 +173,8 @@ export function usePlayer() {
   // Stable refs so effects don't re-run when these change
   const volumeRef = useRef(0.8);
   const pausedAtRef = useRef(0); // where we paused for the current sample
+  // Last `stopSeq` acted on, so a stop can be told apart from a pause.
+  const stopSeqRef = useRef(0);
 
   const {
     currentAsset,
@@ -564,14 +566,24 @@ export function usePlayer() {
       }
 
       if (!isPlaying) {
-        // Pausing
+        // Stopping or pausing. `stop()` means back to the start; `pause()`
+        // means hold the playhead. Treating both as a pause is what made the
+        // play button appear to die on short one-shots: every press recorded a
+        // later resume point until it reached the end of the file, and only
+        // selecting another sample cleared it (issue #12).
+        const { stopSeq } = usePlayerStore.getState();
+        const wasStopped = stopSeq !== stopSeqRef.current;
+        stopSeqRef.current = stopSeq;
+
         if (audioEngine.isActive()) {
-          pausedAtRef.current = audioEngine.pause();
+          const at = audioEngine.pause();
+          pausedAtRef.current = wasStopped ? 0 : at;
         } else if (fallbackActiveRef.current && audioRef.current) {
-          pausedAtRef.current = audioRef.current.currentTime;
+          pausedAtRef.current = wasStopped ? 0 : audioRef.current.currentTime;
           audioRef.current.pause();
           fallbackActiveRef.current = false;
         } else {
+          if (wasStopped) pausedAtRef.current = 0;
           // Not playing anything — just prefetch so it's ready when resumed
           audioEngine.prefetch(currentAsset.path);
         }

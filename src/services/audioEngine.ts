@@ -19,6 +19,11 @@ const PREFETCH_RADIUS = 3;
 const CACHE_MAX = 20;
 // Extra output gain for sample preview playback so perceived loudness is higher.
 const SAMPLE_GAIN_BOOST = 2;
+// How long to watch the context clock before calling it stalled. Long enough to
+// clear a render quantum at any sample rate, short enough to stay invisible.
+const CLOCK_PROBE_MS = 120;
+// Starting a source this close to the end of the buffer is silence in practice.
+const END_OF_BUFFER_EPSILON = 0.01;
 
 // ─── Diagnostics ───────────────────────────────────────────────────────────
 // Verbose audio-path tracing, gated so it never spams release builds. Enable in
@@ -89,6 +94,22 @@ type SinkCapableContext = AudioContext & { setSinkId?: (id: string) => Promise<v
 function isRunning(ctx: AudioContext): boolean {
   return (ctx.state as string) === 'running';
 }
+
+/**
+ * Where in the buffer to actually start.
+ *
+ * An offset at or past the end starts a source that produces no sound and ends
+ * immediately. That used to be reachable by ordinary use: the play button maps
+ * to stop/resume, each stop recorded the playhead, and on a short one-shot a
+ * few quick presses walked the resume point to the end of the file — after
+ * which every press was silent until another sample was selected (issue #12).
+ * Treat it as "play it again" instead, which is what the button means.
+ */
+function startOffsetFor(offsetSec: number, duration: number): number {
+  if (!Number.isFinite(offsetSec) || offsetSec <= 0) return 0;
+  if (offsetSec >= duration - END_OF_BUFFER_EPSILON) return 0;
+  return Math.min(offsetSec, duration);
+}
 type SinkCapableMediaEl = HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
 
 /** Native AudioContext output routing (Chromium). WebKit lacks this. */
@@ -122,7 +143,7 @@ type CacheEntry = {
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
-  private stateWatcherBound = false;
+  private globalListenersBound = false;
   private currentSource: AudioBufferSourceNode | null = null;
   private gainNode: GainNode | null = null;
   private cache = new Map<string, CacheEntry>();
@@ -156,7 +177,7 @@ class AudioEngine {
    * Returns the AudioContext, creating it if needed.
    * Returns a Promise so callers can await resume() before starting a source.
    */
-  async getCtxAsync(): Promise<AudioContext> {
+  async getCtxAsync(allowRebuild = true): Promise<AudioContext> {
     if (!this.ctx || this.ctx.state === 'closed') {
       const Ctor =
         window.AudioContext ||
@@ -182,49 +203,116 @@ class AudioEngine {
         userActivationActive: userActivationActive(),
       });
       await this.wireOutput();
-      this.watchContextState();
+      this.watchContextState(this.ctx);
+      this.bindGlobalListeners();
     }
     if (!isRunning(this.ctx)) {
+      const before = this.ctx.state as string;
       try {
         await this.ctx.resume();
-        alog('ctx:resume', { from: this.ctx.state, stateAfterResume: this.ctx.state });
       } catch {
-        // If resume fails the context is unusable — recreate it next call
-        alog('ctx:resume-failed');
-        this.ctx = null;
-        return this.getCtxAsync();
+        alog('ctx:resume-threw', { from: before });
+      }
+      alog('ctx:resume', { from: before, stateAfterResume: this.ctx.state });
+      // resume() resolving proves nothing. WebKit resolves it on an
+      // 'interrupted' context and leaves the state exactly where it was, and
+      // the source started next then plays into silence while every check
+      // along the way reports success. Only the state afterwards counts.
+      if (!isRunning(this.ctx) && allowRebuild) {
+        alog('ctx:resume-ineffective', { ctxState: this.ctx.state });
+        await this.rebuildContext();
+        return this.getCtxAsync(false);
       }
     }
     return this.ctx;
   }
 
   /**
-   * Keep the context alive across interruptions. macOS can interrupt or
-   * suspend an idle context while the user is in another app; without this
-   * the next play attempt is silent until the app is restarted.
+   * Per-context. Runs for EVERY context, including replacements built by
+   * `rebuildContext` — a single "already bound" flag used to leave every
+   * context after the first one unwatched.
    */
-  private watchContextState() {
-    const ctx = this.ctx;
-    if (!ctx || this.stateWatcherBound) return;
-    this.stateWatcherBound = true;
-
-    const tryResume = () => {
-      const current = this.ctx;
-      if (!current || current.state === 'closed' || isRunning(current)) return;
-      current.resume().catch(() => {
-        alog('ctx:auto-resume-failed', { ctxState: current.state });
-      });
-    };
-
+  private watchContextState(ctx: AudioContext) {
     ctx.addEventListener('statechange', () => {
       alog('ctx:statechange', { ctxState: ctx.state });
-      tryResume();
+      if (this.ctx === ctx && !isRunning(ctx) && ctx.state !== 'closed') {
+        ctx.resume().catch(() => {
+          alog('ctx:auto-resume-failed', { ctxState: ctx.state });
+        });
+      }
     });
-    // Coming back to the app is the moment before the user hits play.
-    window.addEventListener('focus', tryResume);
+  }
+
+  /**
+   * Bound once per page: the app returning to the foreground, and the audio
+   * devices changing underneath us.
+   */
+  private bindGlobalListeners() {
+    if (this.globalListenersBound) return;
+    this.globalListenersBound = true;
+
+    // Coming back to the app is the moment before the user hits play. Note
+    // that `visibilitychange` does NOT fire when another application merely
+    // covers the window — the document stays visible — so `focus` is the
+    // event that actually carries an app switch, which is the case that
+    // matters here (a DAW in front, then back to Stack).
+    window.addEventListener('focus', () => void this.recoverOutput());
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) tryResume();
+      if (!document.hidden) void this.recoverOutput();
     });
+
+    // A DAW opening or releasing the output device surfaces here. The context
+    // is bound to the device it was built on, so this is the other moment
+    // worth re-checking.
+    try {
+      navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+        alog('devices:change');
+        void this.recoverOutput();
+      });
+    } catch {
+      /* no mediaDevices in this webview */
+    }
+  }
+
+  /**
+   * True while the context's clock is actually advancing.
+   *
+   * A context can sit in 'running' and still be dead: once another application
+   * takes the output device, the clock stops, `start()` reports success and
+   * nothing is heard. The state cannot tell those apart — the clock can.
+   */
+  private async isClockAdvancing(ctx: AudioContext): Promise<boolean> {
+    const before = ctx.currentTime;
+    await new Promise((resolve) => setTimeout(resolve, CLOCK_PROBE_MS));
+    return ctx.currentTime > before;
+  }
+
+  /**
+   * Resume a suspended context, and replace one that is wedged.
+   *
+   * This is the recovery path for the dropout after switching to a DAW and
+   * back: the old code only ever called `resume()`, which cannot fix a context
+   * whose device has gone away. Without the rebuild the app stayed silent
+   * until it was restarted.
+   */
+  private async recoverOutput(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state === 'closed') return;
+
+    if (!isRunning(ctx)) {
+      try {
+        await ctx.resume();
+      } catch {
+        /* state is checked below */
+      }
+    }
+    if (this.ctx !== ctx) return; // replaced while we were awaiting
+
+    if (isRunning(ctx) && (await this.isClockAdvancing(ctx))) return;
+    if (this.ctx !== ctx) return;
+
+    alog('ctx:wedged-rebuilding', { ctxState: ctx.state });
+    await this.rebuildContext();
   }
 
   /** Synchronous accessor — only safe after getCtxAsync() has been awaited once. */
@@ -535,7 +623,7 @@ class AudioEngine {
     source.connect(this.gainNode!);
 
     this.startedAt = ctx.currentTime;
-    this.startOffset = Math.max(0, Math.min(offsetSec, buffer.duration));
+    this.startOffset = startOffsetFor(offsetSec, buffer.duration);
     this.currentPath = path; // Track the path
     this.notifyPlaybackStart(path); // Notify UI immediately
 
@@ -611,7 +699,7 @@ class AudioEngine {
     source.connect(this.gainNode!);
 
     this.startedAt = ctx.currentTime;
-    this.startOffset = Math.max(0, Math.min(offsetSec, buffer.duration));
+    this.startOffset = startOffsetFor(offsetSec, buffer.duration);
     this.currentPath = path; // Track the path
     this.notifyPlaybackStart(path); // Notify UI immediately
 

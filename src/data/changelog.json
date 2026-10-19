@@ -1,4 +1,15 @@
 {
+  "1.0.25": {
+    "date": "2026-10-19",
+    "title": "Preview that always plays",
+    "summary": "Playback no longer goes quiet after you've been in another audio app, and the play button no longer gets stuck.",
+    "highlights": [
+      "Sound comes back after you've been in your DAW \u2014 Stack notices when another app has taken over the audio device and reconnects to it.",
+      "The play button no longer stops responding when you retrigger the same sample quickly.",
+      "Pressing play restarts a sample from the beginning; the spacebar still resumes where you paused.",
+      "The playing sample's waveform now sits in the player bar \u2014 click along it to jump."
+    ]
+  },
   "1.0.24": {
     "date": "2026-10-15",
     "title": "One-shots and loops, sorted out",

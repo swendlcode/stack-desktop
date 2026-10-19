@@ -12,6 +12,12 @@ interface PlayerStore {
   bpmSync: number | null;
   /** Seconds to start from on the next asset switch — set by play(asset, startAt). */
   pendingStartAt: number;
+  /**
+   * Bumped by `stop()`. `pause()` and `stop()` both land on `isPlaying: false`,
+   * so without this the player cannot tell "hold my place" from "back to the
+   * start" and treats every stop as a pause. See the note on `stop` below.
+   */
+  stopSeq: number;
 
   play: (asset: Asset, startAt?: number) => void;
   pause: () => void;
@@ -40,6 +46,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   duration: 0,
   bpmSync: null,
   pendingStartAt: 0,
+  stopSeq: 0,
   seekTo: null,
 
   play: (asset, startAt = 0) =>
@@ -50,9 +57,15 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
       duration: 0,
       pendingStartAt: startAt,
     }),
+  /** Hold the playhead — the transport control and the spacebar. */
   pause: () => set({ isPlaying: false }),
   resume: () => set({ isPlaying: true }),
-  stop: () => set({ isPlaying: false, currentTime: 0 }),
+  /**
+   * Back to the start. This is what the play buttons on a row, in the grid and
+   * in the player bar call, so pressing one twice must return the sample to the
+   * beginning rather than parking the playhead where it was interrupted.
+   */
+  stop: () => set((s) => ({ isPlaying: false, currentTime: 0, stopSeq: s.stopSeq + 1 })),
 
   playNext: () => {
     const { currentAsset, playlist } = get();
