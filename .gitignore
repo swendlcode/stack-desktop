@@ -21,7 +21,11 @@ Icon*
 
 # Claude Code
 .claude/
+# Stack keeps its project context local rather than checked in. AGENTS.md is a
+# symlink to it, so it has to be ignored too or the repo would carry a link
+# pointing at a file that is not there.
 CLAUDE.md
+AGENTS.md
 
 # Local research / outreach notes
 research/
