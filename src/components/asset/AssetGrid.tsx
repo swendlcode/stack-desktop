@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useMemo, useState, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { notifyScrollActivity } from '../../hooks/useScrollActivity';
 import { useShallow } from 'zustand/react/shallow';
 import { useQuery } from '@tanstack/react-query';
 import type { Asset, Settings } from '../../types';
@@ -143,9 +144,22 @@ export function AssetGrid({
     count: assets.length,
     getScrollElement: () => scrollContainerRef?.current ?? internalScrollRef.current,
     estimateSize: () => (compactList ? COMPACT_ROW_HEIGHT : ROW_HEIGHT),
-    overscan: 10,
+    // A trackpad flick moves the list faster than React can mount rows, and
+    // whatever is not mounted yet is blank. Ten rows of buffer ran out during
+    // an ordinary fling; this is roughly a screen's worth on either side,
+    // which is what makes a fast scroll read as continuous.
+    overscan: 24,
     scrollMargin,
   });
+
+  // Tell the waveform cells to hold their fetches while this is moving.
+  useEffect(() => {
+    const el = scrollContainerRef?.current ?? internalScrollRef.current;
+    if (!el) return;
+    const onScroll = () => notifyScrollActivity();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [scrollContainerRef]);
 
   // Cached row measurements go stale when density flips.
   useEffect(() => {
@@ -360,6 +374,17 @@ export function AssetGrid({
         className="outline-none focus:ring-0"
         tabIndex={0}
         onKeyDown={handleKeyDown}
+        // Any pointer press anywhere in the list counts as "the user is
+        // aiming at a row", which suppresses the scroll-into-view below.
+        // Marking this in `handleRowClick` alone was not enough: the play
+        // button calls `stopPropagation`, so pressing play never recorded a
+        // pointer selection, the list re-centred the newly playing row under
+        // the cursor, and the next click landed on a different sample. With
+        // the editor open the guard band is ~230px, so the jump was large.
+        // Capture phase, so it runs before any handler that stops the event.
+        onPointerDownCapture={() => {
+          lastPointerSelectRef.current = performance.now();
+        }}
         aria-label="Asset list — use arrow keys to navigate"
       >
         <div
@@ -382,6 +407,12 @@ export function AssetGrid({
                   left: 0,
                   width: '100%',
                   transform: `translateY(${virtualRow.start - scrollMargin}px)`,
+                  // Each row is independent: a change inside one cannot affect
+                  // the geometry of any other, so the browser does not need to
+                  // consider the rest of the list when one re-renders. With
+                  // dozens of rows mounted that is the difference between a
+                  // scroll that glides and one that hitches.
+                  contain: 'layout paint style',
                 }}
               >
                 <AssetRow
@@ -413,7 +444,11 @@ export function AssetGrid({
                 width: '100%',
                 height: `${FOOTER_HEIGHT}px`,
               }}
-              className="flex items-center justify-center border-t border-gray-700/70 px-3"
+              // No top rule. The last row already drops its own bottom border
+              // and the pager is a bordered pill sitting in open space, so the
+              // line only drew a second edge under a list that had already
+              // ended.
+              className="flex items-center justify-center px-3"
             >
               <div className="flex max-w-full items-center gap-1.5 overflow-x-auto rounded-lg border border-gray-700 bg-gray-900/90 px-2 py-1 max-md:scrollbar-none">
                 <button

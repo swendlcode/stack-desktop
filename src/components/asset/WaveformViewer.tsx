@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef } from 'react';
 import { useWaveformCanvas, useWaveformData } from '../../hooks/useWaveform';
 
 interface WaveformViewerProps {
@@ -19,31 +19,22 @@ export function WaveformViewer({
   preloaded,
   onSeek,
 }: WaveformViewerProps) {
-  const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Only fetch from backend if no preloaded data
+  // Only fetch from backend if no preloaded data. The mid-scroll deferral
+  // lives inside the query function, so this component never subscribes to
+  // scroll state and never re-renders because of it.
   const shouldFetch = !preloaded || preloaded.length === 0;
   const { data: fetched } = useWaveformData(shouldFetch ? assetId : null);
   const effective = shouldFetch ? fetched : preloaded;
 
-  useWaveformCanvas(canvasRef, effective, progress);
+  useWaveformCanvas(canvasRef, effective, progress, height);
 
-  // Make sure canvas fills its wrapper — needed because the virtualizer
-  // positions rows absolutely and the canvas may not get a layout pass
-  // before the ResizeObserver fires.
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    const canvas = canvasRef.current;
-    if (!wrapper || !canvas) return;
-
-    // Force canvas to match wrapper size on first render
-    const { width, height: h } = wrapper.getBoundingClientRect();
-    if (width > 0 && h > 0) {
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${h}px`;
-    }
-  }, []);
+  // There is deliberately no sizing effect here. The canvas is stretched by
+  // CSS (`absolute inset-0 h-full w-full`) and measured by the shared
+  // ResizeObserver in `useWaveformCanvas`, so a row can mount without forcing
+  // a layout — which, multiplied by every row a fling passes, is the
+  // difference between a smooth list and a stuttering one.
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!onSeek) return;
@@ -56,7 +47,6 @@ export function WaveformViewer({
 
   return (
     <div
-      ref={wrapperRef}
       className={`relative w-full ${className}`}
       style={{ height }}
     >

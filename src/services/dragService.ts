@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { startDrag } from '@crabnebula/tauri-plugin-drag';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStackDropZoneStore } from '../stores/stackDropZoneStore';
+import { currentZoom } from '../utils/appZoom';
 
 let cachedIcon: string | null = null;
 const cachedPackIcons = new Map<string, string>();
@@ -36,10 +37,15 @@ async function makeViewportMapper(): Promise<
     const win = getCurrentWindow();
     const [pos, scale] = await Promise.all([win.innerPosition(), win.scaleFactor()]);
     const cursorIsPhysical = /Windows|Win32|Win64/i.test(navigator.userAgent);
+    // Interface scale is a second, independent factor: the webview lays out in
+    // CSS pixels that are `zoom` times bigger than the ones the OS reports, so
+    // a rect from getBoundingClientRect sits at 1/zoom of the screen offset.
+    // Without this the drop zones are in the right place only at 100%.
+    const zoom = currentZoom();
     if (cursorIsPhysical) {
-      return (x, y) => ({ x: (x - pos.x) / scale, y: (y - pos.y) / scale });
+      return (x, y) => ({ x: (x - pos.x) / scale / zoom, y: (y - pos.y) / scale / zoom });
     }
-    return (x, y) => ({ x: x - pos.x / scale, y: y - pos.y / scale });
+    return (x, y) => ({ x: (x - pos.x / scale) / zoom, y: (y - pos.y / scale) / zoom });
   } catch {
     return null;
   }

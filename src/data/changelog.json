@@ -1,4 +1,18 @@
 {
+  "1.0.26": {
+    "date": "2026-11-15",
+    "title": "Sound that survives a desktop switch",
+    "summary": "Preview audio keeps working after you've been in another app, the whole interface scales, and the sample editor gains a level meter.",
+    "highlights": [
+      "Audio no longer goes quiet after you switch to your DAW or to another desktop \u2014 and an interrupted sample picks up where it left off.",
+      "Cmd/Ctrl + and \u2212 scale the whole interface, not just the text. Cmd/Ctrl 0 resets it, and there's a control in Settings.",
+      "Drag the sample or MIDI in the player bar straight into your DAW, however far you've scrolled away from it.",
+      "A stereo level meter in the sample editor, with peak hold and a clip light. Right-click any knob to reset it.",
+      "The playhead now keeps time when you shift pitch.",
+      "Going to a sample's folder opens the folder it's actually in, and the sidebar opens up to show you where you landed.",
+      "Smoother scrolling, and a dark theme lifted a little off pure black."
+    ]
+  },
   "1.0.25": {
     "date": "2026-10-19",
     "title": "Preview that always plays",

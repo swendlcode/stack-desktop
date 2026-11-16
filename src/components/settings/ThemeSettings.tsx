@@ -12,7 +12,7 @@ import type { Settings } from '../../types';
 
 /** Representative bg/surface/text per base — used only for the preset previews. */
 const BASE_SWATCH: Record<ThemeBase, { bg: string; surface: string; text: string }> = {
-  dark: { bg: '#0c0c0c', surface: '#242424', text: '#f7f7f7' },
+  dark: { bg: '#141416', surface: '#2d2d31', text: '#f7f7f7' },
   light: { bg: '#ffffff', surface: '#e6e6e6', text: '#1a1a1a' },
 };
 

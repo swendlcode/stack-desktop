@@ -2,12 +2,19 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 
 type Listener = () => void;
 
+// 1024 samples is ~21ms at 48kHz: long enough that a peak is not missed
+// between animation frames, short enough that the reading is current.
+const METER_FFT = 1024;
+
 class EditorEngine {
   private ctx: AudioContext | null = null;
   private buffer: AudioBuffer | null = null;
   private source: AudioBufferSourceNode | null = null;
   private gain: GainNode | null = null;
   private lowpass: BiquadFilterNode | null = null;   // high-cut
+  private analyserL: AnalyserNode | null = null;
+  private analyserR: AnalyserNode | null = null;
+  private meterScratch: Float32Array<ArrayBuffer> | null = null;
   private highpass: BiquadFilterNode | null = null;  // low-cut
   private startedAtCtx = 0;
   private startOffset = 0;
@@ -63,7 +70,56 @@ class EditorEngine {
     this.lowpass.type = 'lowpass';
     this.lowpass.frequency.value = this._highCutHz;
     this.highpass.connect(this.lowpass).connect(this.gain).connect(this.ctx.destination);
+
+    // Metering tap, post-gain — the same point a mixer meter reads, so the
+    // GAIN knob moves the needle like a fader does.
+    //
+    // The tap exists because a splitter alone gets mono wrong: its default
+    // interpretation is "discrete", so a one-channel source lights the left
+    // bar and leaves the right silent. Forcing two channels with "speakers"
+    // interpretation up-mixes mono to both, which is what a meter should show.
+    // Nothing downstream of the analysers is connected, so this branch is a
+    // read and never reaches the output twice.
+    const tap = this.ctx.createGain();
+    tap.channelCount = 2;
+    tap.channelCountMode = 'explicit';
+    tap.channelInterpretation = 'speakers';
+    const splitter = this.ctx.createChannelSplitter(2);
+    this.analyserL = this.ctx.createAnalyser();
+    this.analyserR = this.ctx.createAnalyser();
+    for (const a of [this.analyserL, this.analyserR]) {
+      a.fftSize = METER_FFT;
+      a.smoothingTimeConstant = 0;  // ballistics belong in the meter, not here
+    }
+    this.gain.connect(tap);
+    tap.connect(splitter);
+    splitter.connect(this.analyserL, 0);
+    splitter.connect(this.analyserR, 1);
+    this.meterScratch = new Float32Array(METER_FFT);
+
     return this.ctx;
+  }
+
+  /**
+   * Peak level of each channel since the last read, 0..1 linear.
+   *
+   * Peak rather than RMS: a meter is there to warn about clipping, and an
+   * averaged reading hides exactly the transients that clip. `null` means
+   * there is no graph yet — nothing has been played.
+   */
+  readLevels(): { left: number; right: number } | null {
+    const buf = this.meterScratch;
+    if (!this.analyserL || !this.analyserR || !buf) return null;
+    const peak = (node: AnalyserNode) => {
+      node.getFloatTimeDomainData(buf);
+      let max = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = buf[i] < 0 ? -buf[i] : buf[i];
+        if (v > max) max = v;
+      }
+      return max;
+    };
+    return { left: peak(this.analyserL), right: peak(this.analyserR) };
   }
 
   async load(path: string): Promise<boolean> {
@@ -126,9 +182,7 @@ class EditorEngine {
     const src = this.ctx.createBufferSource();
     // Use work buffer (reversed/normalized) if available, else original
     src.buffer = this._workBuffer ?? this.buffer;
-    // Combine user rate with pitch shift (semitones → ratio)
-    const pitchRatio = Math.pow(2, this._pitchSemitones / 12);
-    src.playbackRate.value = this._rate * pitchRatio;
+    src.playbackRate.value = this.effectiveRate();
     if (this._loopOn) {
       src.loop = true;
       src.loopStart = this._loopStart;
@@ -153,10 +207,45 @@ class EditorEngine {
     this.emit();
   }
 
+  /**
+   * How fast the playhead moves through the buffer, in buffer-seconds per
+   * real second. Pitch is implemented by resampling, so it changes the speed
+   * exactly as the rate control does — and every conversion between wall
+   * clock and buffer position has to use both.
+   *
+   * Leaving pitch out of this is what made the playhead run off the end of
+   * the waveform: at -3 semitones the audio plays 16% slower while the
+   * playhead kept advancing at 1.0, so it reached the right edge with a sixth
+   * of the sample still sounding.
+   */
+  private effectiveRate(): number {
+    return this._rate * Math.pow(2, this._pitchSemitones / 12);
+  }
+
+  /** Current buffer position, from the clock. Valid only while playing. */
+  private positionNow(): number {
+    if (!this.ctx) return this._currentTime;
+    const elapsed = (this.ctx.currentTime - this.startedAtCtx) * this.effectiveRate();
+    return Math.max(0, this.startOffset + elapsed);
+  }
+
+  /**
+   * Re-anchor the clock to the position reached so far.
+   *
+   * Required before any speed change during playback: `startedAtCtx` and
+   * `startOffset` describe a straight line from the last anchor, so changing
+   * the slope without moving the anchor retroactively re-times everything
+   * already played and the playhead jumps.
+   */
+  private rebaseClock() {
+    if (!this._playing || !this.ctx) return;
+    this.startOffset = this.positionNow();
+    this.startedAtCtx = this.ctx.currentTime;
+  }
+
   pause() {
     if (!this._playing || !this.ctx) return;
-    const elapsed = (this.ctx.currentTime - this.startedAtCtx) * this._rate;
-    this._currentTime = Math.max(0, this.startOffset + elapsed);
+    this._currentTime = this.positionNow();
     this.stopSource();
     this._playing = false;
     this.stopTicker();
@@ -186,18 +275,18 @@ class EditorEngine {
   get volume() { return this._volume; }
 
   setRate(r: number) {
+    this.rebaseClock();
     this._rate = r;
-    const pitchRatio = Math.pow(2, this._pitchSemitones / 12);
-    if (this.source) this.source.playbackRate.value = r * pitchRatio;
+    if (this.source) this.source.playbackRate.value = this.effectiveRate();
     this.emit();
   }
   get rate() { return this._rate; }
 
   /** Shift pitch by semitones (-24 to +24). Does not affect playback speed. */
   setPitch(semitones: number) {
+    this.rebaseClock();
     this._pitchSemitones = Math.max(-24, Math.min(24, semitones));
-    const pitchRatio = Math.pow(2, this._pitchSemitones / 12);
-    if (this.source) this.source.playbackRate.value = this._rate * pitchRatio;
+    if (this.source) this.source.playbackRate.value = this.effectiveRate();
     this.emit();
   }
   get pitchSemitones() { return this._pitchSemitones; }
@@ -372,8 +461,7 @@ class EditorEngine {
     this.stopTicker();
     this.ticker = window.setInterval(() => {
       if (!this.ctx || !this.source) return;
-      const elapsed = (this.ctx.currentTime - this.startedAtCtx) * this._rate;
-      let t = this.startOffset + elapsed;
+      let t = this.positionNow();
       if (this._loopOn && this._loopEnd > this._loopStart) {
         const len = this._loopEnd - this._loopStart;
         if (t > this._loopEnd) {
@@ -422,8 +510,9 @@ class EditorEngine {
     const srcDur = this._loopOn && this._loopEnd > this._loopStart
       ? this._loopEnd - this._loopStart
       : srcBuf.duration;
-    const pitchRatio = Math.pow(2, this._pitchSemitones / 12);
-    const effectiveRate = Math.max(0.01, this._rate * pitchRatio);
+    // The export was always correct about this — it is the live playhead
+    // that was not. Same helper now drives both.
+    const effectiveRate = Math.max(0.01, this.effectiveRate());
     const outDur = srcDur / effectiveRate;
     const sampleRate = srcBuf.sampleRate;
     const channels = srcBuf.numberOfChannels;

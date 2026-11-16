@@ -150,6 +150,27 @@ export function usePlayer() {
   // Fallback HTML audio element — only used when buffer isn't cached yet
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fallbackActiveRef = useRef(false);
+  // Which path the fallback element currently has loaded, and a seek waiting
+  // for its metadata to arrive.
+  const fallbackSrcRef = useRef<string | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+
+  /**
+   * Get the HTML element ready to play `path` without actually playing it.
+   *
+   * The fallback used to set `src` and call `load()` at the moment of the
+   * click, so every play it handled arrived audibly late — which is what the
+   * engine failing over to it sounds like from the outside: not silence, lag.
+   * Loading on selection instead means the element is already buffered by the
+   * time it is needed, and the handover costs nothing when it isn't.
+   */
+  const primeFallback = (path: string) => {
+    const audio = audioRef.current;
+    if (!audio || fallbackSrcRef.current === path) return;
+    fallbackSrcRef.current = path;
+    audio.src = convertFileSrc(path);
+    audio.load();
+  };
 
   // Shared AudioContext for MIDI — reused across plays to avoid the browser's
   // ~6 context limit. Closed only when the hook unmounts.
@@ -462,6 +483,14 @@ export function usePlayer() {
       if (fallbackActiveRef.current) setCurrentTime(audio.currentTime);
     };
     const onFallbackMeta = () => {
+      if (pendingSeekRef.current != null) {
+        try {
+          audio.currentTime = pendingSeekRef.current;
+        } catch {
+          /* out of range for this file — start from the top */
+        }
+        pendingSeekRef.current = null;
+      }
       if (fallbackActiveRef.current) setDuration(audio.duration || 0);
     };
     const onFallbackEnd = () => {
@@ -488,11 +517,14 @@ export function usePlayer() {
       }
       // Sample seek
       pausedAtRef.current = time;
-      if (usePlayerStore.getState().isPlaying && current) {
+      // Whichever path is making the sound is the one to seek. Routing a seek
+      // into the engine while the element is playing left the element running
+      // from where it was and the engine unable to start.
+      if (fallbackActiveRef.current && audioRef.current) {
+        audioRef.current.currentTime = time;
+      } else if (usePlayerStore.getState().isPlaying && current) {
         audioEngine.stop();
         audioEngine.playBufferAsync(current.path, time).catch(() => {});
-      } else if (audioRef.current && fallbackActiveRef.current) {
-        audioRef.current.currentTime = time;
       }
     });
 
@@ -584,8 +616,12 @@ export function usePlayer() {
           fallbackActiveRef.current = false;
         } else {
           if (wasStopped) pausedAtRef.current = 0;
-          // Not playing anything — just prefetch so it's ready when resumed
+          // Not playing anything — just prefetch so it's ready when resumed.
+          // Both paths are primed, not only the engine: after the app has been
+          // in the background the engine may not be the one that answers, and
+          // an unprimed element is the audible lag.
           audioEngine.prefetch(currentAsset.path);
+          primeFallback(currentAsset.path);
         }
         return;
       }
@@ -630,16 +666,26 @@ export function usePlayer() {
         fallbackActiveRef.current = false;
       }
 
-      // Use HTML audio as fallback while decoding in background
+      // Use HTML audio as fallback while decoding in background. `primeFallback`
+      // is usually a no-op here because selecting the asset already loaded it;
+      // that is the difference between this path being a seamless stand-in and
+      // being an audible delay.
       const audio = audioRef.current;
       if (audio) {
-        const url = convertFileSrc(currentAsset.path);
+        primeFallback(currentAsset.path);
         fallbackActiveRef.current = true;
-        audio.pause();
-        audio.src = url;
         audio.volume = volumeRef.current;
-        audio.currentTime = offset;
-        audio.load();
+        // Seeking before the element has metadata is ignored, so hold the
+        // offset until `loadedmetadata` if it is not ready yet.
+        if (audio.readyState > 0) {
+          try {
+            audio.currentTime = offset;
+          } catch {
+            pendingSeekRef.current = offset;
+          }
+        } else if (offset > 0) {
+          pendingSeekRef.current = offset;
+        }
         audio.play().catch(() => {});
       }
 
@@ -654,10 +700,16 @@ export function usePlayer() {
         if (state.currentAsset?.id !== assetId || !state.isPlaying) return;
         if (!fallbackActiveRef.current) return;
 
+        // Hand over ONLY if the engine actually took it. `playBuffer` returns
+        // false whenever the AudioContext is not running — exactly what happens
+        // after the app has been in the background — and pausing the element
+        // first turned that into silence while the UI still read "playing".
+        // The element keeps the sound until there is something to hand it to.
         const resumeAt = audioRef.current?.currentTime ?? 0;
-        audioRef.current?.pause();
-        fallbackActiveRef.current = false;
-        audioEngine.playBuffer(assetPath, resumeAt);
+        if (audioEngine.playBuffer(assetPath, resumeAt)) {
+          audioRef.current?.pause();
+          fallbackActiveRef.current = false;
+        }
       });
 
       assetService.incrementPlayCount(currentAsset.id).catch(() => {});

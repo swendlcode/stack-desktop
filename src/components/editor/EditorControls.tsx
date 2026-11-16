@@ -3,6 +3,7 @@ import { useEditorEngine } from "../../hooks/useEditorEngine";
 import { usePlayerStore } from "../../stores/playerStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { Knob } from "../ui/Knob";
+import { LevelMeter } from "./LevelMeter";
 import { BpmStepper } from "./BpmStepper";
 import {
   Play,
@@ -118,6 +119,10 @@ export function EditorControls({ assetBpm, onDragExport, dragging }: Props) {
         valueText={formatDb(gainToDb(s.volume))}
         onChange={(v) => editorEngine.setVolume(dbToGain(knobToDb(v)))}
       />
+
+      {/* Sits with the knobs, not off in the corner: it is the readout for
+          the gain control immediately to its left. */}
+      <LevelMeter />
 
       <Divider />
 

@@ -251,12 +251,30 @@ export const AssetRow = memo(function AssetRow({
     asset.type === "project" ? ((asset.meta as ProjectMeta | undefined)?.daw ?? null) : null;
   const showsDawIcon = hasDawIcon(projectDaw);
 
-  const goToFolder = () => {
-    if (packRoot) {
-      setPathPrefix(packRoot);
-      setActivePage("browser");
-    }
+  // The folder this file actually sits in. A "pack" is whatever folder sits
+  // immediately under a watched root, which for a library organised by genre
+  // is the genre: `Samples/Future House` holds 8,506 files, and sending
+  // someone there when they asked to see where a sample lives is not an
+  // answer. Navigation goes to the containing folder; the pack is still
+  // reachable, as its own menu entry, when it is somewhere different.
+  const assetFolder = (() => {
+    if (!asset.path) return null;
+    const norm = asset.path.replace(/\\/g, "/");
+    const cut = norm.lastIndexOf("/");
+    return cut > 0 ? norm.slice(0, cut) : null;
+  })();
+
+  const navigateTo = (path: string | null) => {
+    if (!path) return;
+    setPathPrefix(path);
+    setActivePage("browser");
   };
+
+  const goToFolder = () => navigateTo(assetFolder);
+
+  const packName = packRoot?.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? null;
+  const folderName = assetFolder?.split("/").filter(Boolean).pop() ?? null;
+  const packIsElsewhere = !!packRoot && !!assetFolder && packRoot !== assetFolder;
 
   // "PackName/sub/folder" when the file lives under its pack, else the last
   // two path segments — enough to place the sample without the full path.
@@ -352,10 +370,18 @@ export const AssetRow = memo(function AssetRow({
     },
     // ── Navigation ──
     {
-      label: "Go to pack folder",
+      label: folderName ? `Go to ${folderName}` : "Go to folder",
       onSelect: goToFolder,
-      disabled: !packRoot,
+      disabled: !assetFolder,
     },
+    ...(packIsElsewhere
+      ? [
+          {
+            label: packName ? `Go to pack · ${packName}` : "Go to pack folder",
+            onSelect: () => navigateTo(packRoot),
+          },
+        ]
+      : []),
     {
       label: "Open detail view",
       onSelect: () => onOpenDetail?.(asset),
@@ -444,8 +470,8 @@ export const AssetRow = memo(function AssetRow({
             goToFolder();
           }}
           className="shrink-0 overflow-hidden rounded-md focus:outline-none focus:ring-1 focus:ring-stack-fire"
-          title={`Go to ${asset.packName ?? "pack folder"}`}
-          aria-label="Go to pack folder"
+          title={folderName ? `Go to ${folderName}` : "Go to folder"}
+          aria-label="Go to folder"
         >
           {showsDawIcon ? (
             <span

@@ -24,6 +24,13 @@ const SAMPLE_GAIN_BOOST = 2;
 const CLOCK_PROBE_MS = 120;
 // Starting a source this close to the end of the buffer is silence in practice.
 const END_OF_BUFFER_EPSILON = 0.01;
+// How hard to try resuming before declaring a context wedged. WebKit un-
+// interrupts asynchronously after the window comes back, so the first resume
+// can resolve into a state that is still not 'running'.
+const RESUME_ATTEMPTS = 5;
+const RESUME_RETRY_MS = 60;
+// How long to let a click get its sound out before rebuilding underneath it.
+const DEFERRED_REBUILD_MS = 500;
 
 // ─── Diagnostics ───────────────────────────────────────────────────────────
 // Verbose audio-path tracing, gated so it never spams release builds. Enable in
@@ -144,6 +151,24 @@ type CacheEntry = {
 class AudioEngine {
   private ctx: AudioContext | null = null;
   private globalListenersBound = false;
+  // Sample rate the cached buffers were decoded at. An AudioBuffer is only
+  // reusable in another context at the same rate, so this is what decides
+  // whether a rebuild has to throw the cache away.
+  private cacheSampleRate: number | null = null;
+  // Set while the window is in the background. The context can be interrupted
+  // out of sight — switching macOS Spaces is enough — so the next time the
+  // user touches the app we re-check the clock rather than assume.
+  private backgroundSinceLastCheck = false;
+  // True once a context has existed. Distinguishes "torn down and owed a
+  // replacement" from "the user has not played anything yet", so we never
+  // build a context nobody asked for.
+  private hadContext = false;
+  // In-flight heal kicked off from a synchronous path.
+  private healing: Promise<unknown> | null = null;
+  // In-flight recovery, so overlapping app-switch events coalesce.
+  private recovering: Promise<void> | null = null;
+  // In-flight context construction, so concurrent callers share one context.
+  private ctxInit: Promise<void> | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
   private gainNode: GainNode | null = null;
   private cache = new Map<string, CacheEntry>();
@@ -179,52 +204,74 @@ class AudioEngine {
    */
   async getCtxAsync(allowRebuild = true): Promise<AudioContext> {
     if (!this.ctx || this.ctx.state === 'closed') {
-      const Ctor =
-        window.AudioContext ||
-        (window as Window & { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      // sampleRate is immutable per context — honoring the user's choice means
-      // passing it at construction. Invalid rates throw, so fall back to default.
-      try {
-        this.ctx = this.preferredSampleRate
-          ? new Ctor({ sampleRate: this.preferredSampleRate })
-          : new Ctor();
-      } catch {
-        this.ctx = new Ctor();
+      // Coalesced. Recovery, a healing click and an ordinary play can all want
+      // a context at the same moment; unguarded, each would construct its own
+      // and the last writer would orphan the others — live contexts holding
+      // the output device open with nothing able to close them.
+      if (!this.ctxInit) {
+        this.ctxInit = this.createContext().finally(() => {
+          this.ctxInit = null;
+        });
       }
-      this.gainNode = this.ctx.createGain();
-      this.gainNode.gain.value = this.volume * SAMPLE_GAIN_BOOST;
-      // The key diagnostic: was the context born inside a user gesture? On WebKit
-      // a context created without one can report 'running' yet stay muted.
-      alog('ctx:construct', {
-        stateAfterCtor: this.ctx.state,
-        sampleRate: this.ctx.sampleRate,
-        requestedSampleRate: this.preferredSampleRate,
-        userActivationActive: userActivationActive(),
-      });
-      await this.wireOutput();
-      this.watchContextState(this.ctx);
-      this.bindGlobalListeners();
+      await this.ctxInit;
     }
-    if (!isRunning(this.ctx)) {
-      const before = this.ctx.state as string;
+    if (!isRunning(this.ctx!)) {
+      const before = this.ctx!.state as string;
       try {
-        await this.ctx.resume();
+        await this.ctx!.resume();
       } catch {
         alog('ctx:resume-threw', { from: before });
       }
-      alog('ctx:resume', { from: before, stateAfterResume: this.ctx.state });
+      alog('ctx:resume', { from: before, stateAfterResume: this.ctx!.state });
       // resume() resolving proves nothing. WebKit resolves it on an
       // 'interrupted' context and leaves the state exactly where it was, and
       // the source started next then plays into silence while every check
       // along the way reports success. Only the state afterwards counts.
-      if (!isRunning(this.ctx) && allowRebuild) {
-        alog('ctx:resume-ineffective', { ctxState: this.ctx.state });
-        await this.rebuildContext();
+      if (!isRunning(this.ctx!) && allowRebuild) {
+        alog('ctx:resume-ineffective', { ctxState: this.ctx!.state });
+        await this.rebuildContext(false);
         return this.getCtxAsync(false);
       }
     }
-    return this.ctx;
+    return this.ctx!;
+  }
+
+  private async createContext(): Promise<void> {
+    const Ctor =
+      window.AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    // sampleRate is immutable per context — honoring the user's choice means
+    // passing it at construction. Invalid rates throw, so fall back to default.
+    try {
+      this.ctx = this.preferredSampleRate
+        ? new Ctor({ sampleRate: this.preferredSampleRate })
+        : new Ctor();
+    } catch {
+      this.ctx = new Ctor();
+    }
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.gain.value = this.volume * SAMPLE_GAIN_BOOST;
+    // The key diagnostic: was the context born inside a user gesture? On WebKit
+    // a context created without one can report 'running' yet stay muted.
+    alog('ctx:construct', {
+      stateAfterCtor: this.ctx.state,
+      sampleRate: this.ctx.sampleRate,
+      requestedSampleRate: this.preferredSampleRate,
+      userActivationActive: userActivationActive(),
+    });
+    // Buffers decoded for the previous context are still good as long as the
+    // rate matches, and keeping them matters: a cache miss drops the next
+    // click onto the HTML-audio path instead of the instant one.
+    if (this.cacheSampleRate !== null && this.cacheSampleRate !== this.ctx.sampleRate) {
+      this.cache.clear();
+      this.decoding.clear();
+    }
+    this.cacheSampleRate = this.ctx.sampleRate;
+    this.hadContext = true;
+    await this.wireOutput();
+    this.watchContextState(this.ctx);
+    this.bindGlobalListeners();
   }
 
   /**
@@ -256,10 +303,27 @@ class AudioEngine {
     // covers the window — the document stays visible — so `focus` is the
     // event that actually carries an app switch, which is the case that
     // matters here (a DAW in front, then back to Stack).
+    window.addEventListener('blur', () => {
+      this.backgroundSinceLastCheck = true;
+    });
     window.addEventListener('focus', () => void this.recoverOutput());
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) void this.recoverOutput();
+      if (document.hidden) this.backgroundSinceLastCheck = true;
+      else void this.recoverOutput();
     });
+
+    // Last line of defence. Switching macOS Spaces interrupts the context, and
+    // the window does not reliably report that with a `focus` event — the user
+    // comes back to a dead engine and clicks play. A pointer landing on the app
+    // after any spell in the background re-checks before that click is handled;
+    // the flag keeps the clock probe off the ordinary click path.
+    window.addEventListener(
+      'pointerdown',
+      () => {
+        if (this.backgroundSinceLastCheck) void this.recoverOutput(false);
+      },
+      true
+    );
 
     // A DAW opening or releasing the output device surfaces here. The context
     // is bound to the device it was built on, so this is the other moment
@@ -295,24 +359,99 @@ class AudioEngine {
    * whose device has gone away. Without the rebuild the app stayed silent
    * until it was restarted.
    */
-  private async recoverOutput(): Promise<void> {
-    const ctx = this.ctx;
-    if (!ctx || ctx.state === 'closed') return;
+  private recoverOutput(destructive = true): Promise<void> {
+    // `focus`, `visibilitychange` and `pointerdown` can all land on the same
+    // app switch. Two recoveries in flight would race over the rebuild — one
+    // closing the context the other had just stood up.
+    if (!this.recovering) {
+      this.recovering = this.runRecovery(destructive).finally(() => {
+        this.recovering = null;
+      });
+    }
+    return this.recovering;
+  }
 
-    if (!isRunning(ctx)) {
+  private async runRecovery(destructive: boolean): Promise<void> {
+    this.backgroundSinceLastCheck = false;
+    const ctx = this.ctx;
+    // Nothing to recover, but also nothing to play through: a previous
+    // recovery may have torn the context down. Build the replacement now
+    // rather than leaving the engine dead until something awaits it.
+    if (!ctx || ctx.state === 'closed') {
+      if (this.hadContext) await this.getCtxAsync().catch(() => {});
+      return;
+    }
+
+    // Retry rather than resume once. WebKit interrupts and un-interrupts the
+    // context around backgrounding, and a resume issued while that is in
+    // flight resolves without changing the state — the reports on
+    // webkit.org/b/240646 converge on "keep asking until it reads running".
+    // A handful of attempts costs a few hundred ms on an app switch and saves
+    // throwing away a context that was about to come back on its own.
+    for (let attempt = 0; attempt < RESUME_ATTEMPTS && !isRunning(ctx); attempt += 1) {
       try {
         await ctx.resume();
       } catch {
         /* state is checked below */
       }
+      if (this.ctx !== ctx) return;
+      if (isRunning(ctx)) break;
+      await new Promise((resolve) => setTimeout(resolve, RESUME_RETRY_MS));
     }
     if (this.ctx !== ctx) return; // replaced while we were awaiting
 
     if (isRunning(ctx) && (await this.isClockAdvancing(ctx))) return;
     if (this.ctx !== ctx) return;
 
+    // A non-destructive pass stops here. This runs on `pointerdown`, which
+    // means a click is in flight: tearing the context down now would leave
+    // `getCtxSync` null for the very play the user is making, pushing it onto
+    // the HTML-audio path and giving them an audible lag instead of an
+    // instant hit. The rebuild is deferred until just after, when the sound
+    // has already started and stopping the engine costs nothing.
+    if (!destructive) {
+      alog('ctx:wedged-deferring-rebuild', { ctxState: ctx.state });
+      window.setTimeout(() => void this.recoverOutput(true), DEFERRED_REBUILD_MS);
+      return;
+    }
+
     alog('ctx:wedged-rebuilding', { ctxState: ctx.state });
-    await this.rebuildContext();
+    // What was playing, and how far in. The stalled clock is the useful part
+    // here: `currentTime` froze at the moment the device went away, which is
+    // the point to pick the sample back up from.
+    const resumePath = this.currentPath;
+    const resumeAt = resumePath
+      ? Math.max(0, this.startOffset + (ctx.currentTime - this.startedAt))
+      : 0;
+    await this.rebuildContext(false);
+    // Stand the replacement up straight away. Leaving `ctx` null was the whole
+    // bug behind "the sound disappears after a DAW, or after switching Spaces,
+    // and never comes back": the only caller that builds a context is
+    // `getCtxAsync`, and the hot play path goes through the synchronous
+    // `playBuffer`, which never awaits anything. The engine stayed dead for the
+    // rest of the session.
+    await this.getCtxAsync().catch(() => {});
+
+    // Pick up where the interruption cut in. Only when a sample was actually
+    // mid-flight — recovery on a quiet app must not start making noise.
+    if (resumePath && this.getCtxSync()) {
+      await this.playBufferAsync(resumePath, resumeAt).catch(() => {});
+    }
+  }
+
+  /**
+   * Fire-and-forget context repair, callable from a synchronous path.
+   *
+   * Coalesced: a run of failing clicks must not stack up rebuilds on top of
+   * each other, which would close the context the previous one just opened.
+   */
+  private heal(): void {
+    if (this.healing) return;
+    this.healing = this.getCtxAsync()
+      .catch(() => null)
+      .finally(() => {
+        this.healing = null;
+      });
   }
 
   /** Synchronous accessor — only safe after getCtxAsync() has been awaited once. */
@@ -397,10 +536,18 @@ class AudioEngine {
    * with current preferences. Buffers are decoded at the old context's sample
    * rate, so they must be dropped when the rate changes.
    */
-  private async rebuildContext(): Promise<void> {
+  private async rebuildContext(dropBuffers = true): Promise<void> {
     this.stopCurrentSource();
-    this.cache.clear();
-    this.decoding.clear();
+    if (dropBuffers) {
+      this.cache.clear();
+      this.decoding.clear();
+      this.cacheSampleRate = null;
+    } else {
+      // In-flight decodes belong to the context that is going away; the
+      // finished buffers do not, and `getCtxAsync` drops them if the
+      // replacement comes up at a different rate.
+      this.decoding.clear();
+    }
     if (this.sinkAudioEl) {
       this.sinkAudioEl.pause();
       this.sinkAudioEl.srcObject = null;
@@ -663,6 +810,9 @@ class AudioEngine {
     const buffer = this.getBuffer(path);
     if (!buffer) {
       alog('playSync:buffer-miss', { path, userActivationActive: userActivationActive() });
+      // The decode that follows runs outside this gesture; make sure it has a
+      // live context to land in when it finishes.
+      this.heal();
       // Buffer not cached — sync fast path can't play. Critically, if a
       // DIFFERENT asset is currently playing through this engine, stop it
       // now. Otherwise the engine reports `isActive() === true` while the
@@ -685,6 +835,11 @@ class AudioEngine {
         ctxState: this.ctx?.state ?? 'none',
         userActivationActive: userActivationActive(),
       });
+      // This click is lost to the HTML-audio fallback, but the next one need
+      // not be. A click is also the context's best chance of coming back —
+      // every account of this WebKit bug ends with "resume it from a gesture
+      // handler" — so take it.
+      this.heal();
       // Same reasoning as above — keep the engine's state honest.
       if (this.currentSource && this.currentPath !== path) {
         this.stopCurrentSource();

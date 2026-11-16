@@ -3,7 +3,7 @@ import { useCallback, useRef } from 'react';
 interface KnobProps {
   /** Normalized 0..1 value the knob displays. */
   value: number;
-  /** Value applied on double-click. If unset, double-click is a no-op. */
+  /** Value restored on double-click or right-click. Unset makes both no-ops. */
   defaultValue?: number;
   onChange: (v: number) => void;
   size?: number;
@@ -76,8 +76,16 @@ export function Knob({
     onChange(Math.max(0, Math.min(1, value + step)));
   };
 
-  const onDoubleClick = () => {
+  const reset = () => {
     if (defaultValue != null) onChange(defaultValue);
+  };
+
+  // Right-click resets, the way every plugin and DAW knob does. Without the
+  // handler the press fell through to the webview's own menu and offered to
+  // reload the app, which is not a thing anyone wants next to a pitch control.
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    reset();
   };
 
   const v = Math.max(0, Math.min(1, value));
@@ -108,7 +116,8 @@ export function Knob({
         width={size}
         height={size}
         onMouseDown={onMouseDown}
-        onDoubleClick={onDoubleClick}
+        onDoubleClick={reset}
+        onContextMenu={onContextMenu}
         onWheel={onWheel}
         className="cursor-ns-resize"
         role="slider"

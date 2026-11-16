@@ -23,11 +23,16 @@ export function PackDescription({
     if (!dirtyRef.current) setValue(remote);
   }, [remote]);
 
+  // The height always equals the content, so there is never anything to
+  // scroll to — see `overflow-hidden` below. `scrollHeight` is an integer and
+  // the real line box is fractional at any interface scale other than 100%,
+  // so round up: a height one sub-pixel short is overflow, and overflow on a
+  // field this shape is a scrollbar drawn across the only line of text.
   const autoresize = () => {
     const el = taRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
+    el.style.height = `${Math.ceil(el.scrollHeight) + 1}px`;
   };
 
   useEffect(autoresize, [value]);
@@ -63,7 +68,7 @@ export function PackDescription({
       placeholder={placeholder}
       disabled={!packRoot}
       rows={1}
-      className="w-full resize-none bg-transparent text-sm text-gray-300 placeholder:text-gray-600 focus:outline-none focus:ring-0"
+      className="w-full resize-none overflow-hidden bg-transparent text-sm text-gray-300 placeholder:text-gray-600 focus:outline-none focus:ring-0"
     />
   );
 }

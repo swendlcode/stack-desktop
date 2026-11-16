@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useQueryClient } from '@tanstack/react-query';
 import { useQuery } from '@tanstack/react-query';
@@ -341,6 +341,23 @@ function TreeNodeView({
 
   const active = pathPrefix === node.path;
   const hasChildren = node.children.length > 0;
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
+  // Reveal whatever the browser is filtered to. Jumping to a folder from a
+  // row's context menu used to set the filter and leave the sidebar exactly as
+  // it was — the tree never opened, nothing was highlighted, and there was no
+  // sign of where you had landed. Every ancestor of the selected path opens
+  // itself; the selected row scrolls into view.
+  useEffect(() => {
+    if (!pathPrefix) return;
+    if (pathPrefix !== node.path && pathPrefix.startsWith(`${node.path}/`)) {
+      setOpenState(true);
+    }
+  }, [pathPrefix, node.path]);
+
+  useEffect(() => {
+    if (active) rowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
   const Icon = open ? FolderOpen : Folder;
   const color = depth === 0 ? packColorFor(node.path) : null;
   const isDropTarget = dropPath === node.path && dragPath !== null && dragPath !== node.path;
@@ -356,6 +373,7 @@ function TreeNodeView({
   return (
     <div>
       <div
+        ref={rowRef}
         data-tree-path={node.path}
         className={`group flex w-full items-center gap-1.5 rounded-md text-left transition-colors ${
           isDropTarget

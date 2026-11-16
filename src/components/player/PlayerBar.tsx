@@ -18,6 +18,8 @@ import {
 import { formatKey, formatBpm } from "../../utils/formatters";
 import { audioEngine } from "../../services/audioEngine";
 import { assetService } from "../../services/assetService";
+import { dragService } from "../../services/dragService";
+import { useStackDropZoneStore } from "../../stores/stackDropZoneStore";
 
 /**
  * The progress line is the only thing in the bar that depends on playback
@@ -367,8 +369,29 @@ export function PlayerBar() {
         </div>
       )}
 
-      {/* ── CENTRE-LEFT: Artwork + name + type ── */}
-      <div className="order-1 flex min-w-0 flex-1 items-center gap-3 md:order-none lg:max-w-[22rem]">
+      {/* ── CENTRE-LEFT: Artwork + name + type ──
+          Also the drag-out handle. The asset row was the only way to drag a
+          file into a DAW, and the list is virtualized: scroll away from what
+          you are auditioning and the row that could be dragged no longer
+          exists. The player bar always holds the current asset, so it is the
+          one drag source that cannot scroll out from under you. */}
+      <div
+        draggable={!!currentAsset}
+        onDragStart={(e) => {
+          if (!currentAsset) return;
+          // Hand the OS the drag instead of the webview — same path the rows
+          // take, so the DAW receives a real file reference.
+          e.preventDefault();
+          useStackDropZoneStore.getState().setDraggingAssets([currentAsset]);
+          dragService
+            .startFileDrag([currentAsset.path], { packRoot })
+            .catch((err) => console.error("drag-out failed", err));
+        }}
+        title={currentAsset ? "Drag to your DAW" : undefined}
+        className={`order-1 flex min-w-0 flex-1 items-center gap-3 rounded-md md:order-none lg:max-w-[22rem] ${
+          currentAsset ? "cursor-grab active:cursor-grabbing" : ""
+        }`}
+      >
         <div className="shrink-0">
           <PackCover
             packRoot={packRoot}

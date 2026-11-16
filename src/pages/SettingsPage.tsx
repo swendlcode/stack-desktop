@@ -18,6 +18,7 @@ import {
 
 import { Slider } from '../components/ui/Slider';
 import { ThemeSettings } from '../components/settings/ThemeSettings';
+import { ZoomSetting } from '../components/settings/ZoomSetting';
 import { SettingRow, SettingSection, Toggle } from '../components/settings/primitives';
 import { WebAccessSettings } from '../components/settings/WebAccessSettings';
 import { PluginFolderSettings } from '../components/settings/PluginFolderSettings';
@@ -568,8 +569,9 @@ export function SettingsPage() {
         {/* ── Appearance ── */}
         <SettingSection
           title="Appearance"
-          description="Customise what's shown in the asset list."
+          description="How big the interface is, and what's shown in the asset list."
         >
+          <ZoomSetting />
           <SettingRow
             label="Show Plugins in sidebar"
             description="Display the Plugins section in the left sidebar navigation."
