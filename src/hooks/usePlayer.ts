@@ -164,9 +164,28 @@ export function usePlayer() {
    * Loading on selection instead means the element is already buffered by the
    * time it is needed, and the handover costs nothing when it isn't.
    */
+  /**
+   * Silence the HTML element and forget any seek queued for it.
+   *
+   * Exactly one of the two paths may be making sound. Nothing used to stop
+   * the element when the engine took over, so after one fallback play the
+   * element kept going underneath every later sample — you heard the old one
+   * over the new, its clock drove the playhead, and its `ended` paused or
+   * skipped whatever was actually selected.
+   */
+  const stopFallback = () => {
+    pendingSeekRef.current = null;
+    if (!fallbackActiveRef.current) return;
+    audioRef.current?.pause();
+    fallbackActiveRef.current = false;
+  };
+
   const primeFallback = (path: string) => {
     const audio = audioRef.current;
     if (!audio || fallbackSrcRef.current === path) return;
+    // A seek queued for the previous file would otherwise be applied to this
+    // one on its `loadedmetadata`, starting it at the wrong place.
+    pendingSeekRef.current = null;
     fallbackSrcRef.current = path;
     audio.src = convertFileSrc(path);
     audio.load();
@@ -478,6 +497,20 @@ export function usePlayer() {
     audioEngine.onDuration = (d) => setDuration(d);
     audioEngine.onEnded = () => handleTrackEndRef.current();
 
+    // A dead context has been replaced. The engine deliberately does not
+    // restart anything itself — it has no idea what the user wants — so the
+    // decision is made here, from the store, and only for a sample that is
+    // still selected, still meant to be playing, and not already coming out
+    // of the element.
+    audioEngine.onContextRestored = () => {
+      const state = usePlayerStore.getState();
+      const asset = state.currentAsset;
+      if (!asset || asset.type !== 'sample' || !state.isPlaying) return;
+      if (fallbackActiveRef.current) return;
+      if (audioEngine.isPlayingPath(asset.path)) return;
+      audioEngine.playBufferAsync(asset.path, pausedAtRef.current).catch(() => {});
+    };
+
     // Fallback HTML audio events
     const onFallbackTime = () => {
       if (fallbackActiveRef.current) setCurrentTime(audio.currentTime);
@@ -535,6 +568,7 @@ export function usePlayer() {
       audioEngine.onTimeUpdate = null;
       audioEngine.onDuration = null;
       audioEngine.onEnded = null;
+      audioEngine.onContextRestored = null;
       stopMidiNodes();
       // Close the shared MIDI context on unmount
       if (midiCtxRef.current && midiCtxRef.current.state !== 'closed') {
@@ -610,10 +644,13 @@ export function usePlayer() {
         if (audioEngine.isActive()) {
           const at = audioEngine.pause();
           pausedAtRef.current = wasStopped ? 0 : at;
+          // Not `else if`: the element can be live at the same time after a
+          // fallback play, and leaving it running is audio that no transport
+          // control can stop.
+          stopFallback();
         } else if (fallbackActiveRef.current && audioRef.current) {
           pausedAtRef.current = wasStopped ? 0 : audioRef.current.currentTime;
-          audioRef.current.pause();
-          fallbackActiveRef.current = false;
+          stopFallback();
         } else {
           if (wasStopped) pausedAtRef.current = 0;
           // Not playing anything — just prefetch so it's ready when resumed.
@@ -635,6 +672,7 @@ export function usePlayer() {
       // the new asset never starts. That was the "click play → nothing happens
       // until you hit Stop first" bug.
       if (audioEngine.isPlayingPath(currentAsset.path)) {
+        stopFallback();
         if (currentAsset.durationMs) {
           setDuration(currentAsset.durationMs / 1000);
         }
@@ -655,15 +693,25 @@ export function usePlayer() {
       // Try instant buffer playback first
       const started = audioEngine.playBuffer(currentAsset.path, offset);
       if (started) {
+        stopFallback();
         assetService.incrementPlayCount(currentAsset.id).catch(() => {});
         return;
       }
 
-      // Buffer not ready — clear any stale fallback state immediately so
-      // the ensureBuffer callback below can't be confused by old state
-      if (fallbackActiveRef.current) {
-        audioRef.current?.pause();
-        fallbackActiveRef.current = false;
+      // The engine could not take it. Clear any stale element state before
+      // deciding where this one goes.
+      stopFallback();
+
+      // A decoded buffer with no context is NOT a reason to use the element.
+      // The sample is already in memory; all that is missing is somewhere to
+      // play it, and asking for a context here resumes it inside the user's
+      // own gesture — the one moment WebKit reliably grants one. Loading the
+      // file into an <audio> element instead is what made every first play
+      // after a DAW arrive late.
+      if (audioEngine.hasBuffer(currentAsset.path)) {
+        audioEngine.playBufferAsync(currentAsset.path, offset).catch(() => {});
+        assetService.incrementPlayCount(currentAsset.id).catch(() => {});
+        return;
       }
 
       // Use HTML audio as fallback while decoding in background. `primeFallback`

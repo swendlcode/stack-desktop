@@ -96,9 +96,12 @@ export function BrowserPage() {
           />
         </div>
 
-        {!isLoading && assets.length > 0 && (
-          <ResultsHeader resultCount={totalCount} />
-        )}
+        {/* Deliberately not gated on `isLoading`. This sits above a virtualized
+            list in the same scroll container, so it appearing or disappearing
+            moves every row by its own height — about one row — and a click in
+            flight lands on the neighbour of the row that was aimed at. Its
+            presence now depends only on whether there is anything to show. */}
+        {assets.length > 0 && <ResultsHeader resultCount={totalCount} />}
         {isLoading && assets.length === 0 ? (
           <div className="flex h-full items-center justify-center text-gray-500">
             Loading library...

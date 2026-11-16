@@ -1,4 +1,16 @@
 {
+  "1.0.27": {
+    "date": "2026-11-15",
+    "title": "Preview that plays the right sample, instantly",
+    "summary": "Fixes the delay, and the wrong sample playing, after coming back from another app or desktop.",
+    "highlights": [
+      "Pressing play after you've been in your DAW is immediate again, instead of arriving noticeably late.",
+      "The sample you press is the sample you hear. Previews now start on press rather than on release, so a list that shifts underneath you can no longer send the click to the wrong row.",
+      "Coming back from another app no longer restarts whatever was playing before you left, over the one you just picked.",
+      "Samples load as you hover, so clicking one plays it straight away.",
+      "A new Response setting under Audio output trades latency against stability, and Audio diagnostics reports the latency you actually got."
+    ]
+  },
   "1.0.26": {
     "date": "2026-11-15",
     "title": "Sound that survives a desktop switch",

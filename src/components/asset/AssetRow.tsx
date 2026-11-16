@@ -38,6 +38,7 @@ import { useUiStore } from "../../stores/uiStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useStackDropZoneStore } from "../../stores/stackDropZoneStore";
 import { audioEngine } from "../../services/audioEngine";
+import { isScrollingNow } from "../../hooks/useScrollActivity";
 import type { MidiMeta, MidiNote, ProjectMeta } from "../../types";
 
 type ViewType = "sample" | "midi" | "preset" | "project" | "favorites";
@@ -430,13 +431,44 @@ export const AssetRow = memo(function AssetRow({
             console.error("drag-out failed", err);
           });
       }}
-      onClick={handleRowClick}
+      // Audition on PRESS, not on release.
+      //
+      // A click is delivered to whatever sits under the pointer when the
+      // button comes back up. Anything that changes the height of what is
+      // above this list between press and release — a header that renders
+      // only while not loading, a hero appearing — slides every row, and the
+      // click lands on the neighbour of the one that was aimed at. That is
+      // the "it registered on the wrong sample" report, and no amount of
+      // care inside the row can fix it, because by then the event has already
+      // been addressed to the wrong element.
+      //
+      // Acting on pointerdown removes the window entirely: the row that was
+      // under the pointer when it went down is the row that responds. It also
+      // takes the press-to-release time out of the perceived latency, which
+      // is how hardware samplers have always behaved.
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        // Let the row's own controls — play, favourite, checkbox, menu —
+        // handle their own presses.
+        if ((e.target as HTMLElement).closest('button,input,a,[role="slider"]')) return;
+        handleRowClick(e);
+      }}
       onDoubleClick={() => {
         if (asset.type === "project") {
           openProjectTimeline();
           return;
         }
         onOpenDetail?.(asset);
+      }}
+      // Decode before the click, not after it. Only keyboard navigation was
+      // prefetched (the rows either side of the selection), so clicking any
+      // row you had not arrowed to meant waiting for a decode before anything
+      // was heard — a small delay, on every mouse-driven audition. Hovering is
+      // the cheapest honest signal of intent. Skipped while the list is
+      // moving, because rows sliding under a stationary cursor fire this for
+      // every one they pass.
+      onPointerEnter={() => {
+        if (canPlay && !isScrollingNow()) audioEngine.prefetch(asset.path);
       }}
       onContextMenu={(e) => {
         e.preventDefault();

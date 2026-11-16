@@ -3,7 +3,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { libraryService } from '../services/libraryService';
 import { settingsService } from '../services/settingsService';
-import { audioEngine } from '../services/audioEngine';
+import { audioEngine, type LatencyChoice } from '../services/audioEngine';
 import { usePlayerStore } from '../stores/playerStore';
 import { Button } from '../components/ui/Button';
 import {
@@ -194,6 +194,12 @@ function FolderInfoRow({ folder, onRemove }: { folder: WatchedFolder; onRemove: 
 // AudioContext). Output-device routing depends on setSinkId, which WKWebView may
 // not support — so that control is shown only when the runtime can actually use it.
 
+const LATENCY_OPTIONS = [
+  { value: 'interactive', label: 'Lowest' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'playback', label: 'Most stable' },
+];
+
 const SAMPLE_RATE_OPTIONS = [
   { value: '', label: 'System default' },
   { value: '44100', label: '44.1 kHz' },
@@ -209,6 +215,7 @@ function AudioOutputSettings() {
   const [sampleRate, setSampleRate] = useState<string>(
     () => String(audioEngine.getPreferredSampleRate() ?? '')
   );
+  const [latency, setLatency] = useState<LatencyChoice>(() => audioEngine.getPreferredLatency());
 
   const [unlocking, setUnlocking] = useState(false);
 
@@ -238,7 +245,7 @@ function AudioOutputSettings() {
   return (
     <SettingSection
       title="Audio output"
-      description="Choose where previews play and at what sample rate."
+      description="Where previews play, how quickly, and at what sample rate."
     >
       {supportsOutput ? (
         <SettingRow
@@ -269,6 +276,19 @@ function AudioOutputSettings() {
           <span className="mono text-xs text-gray-500">Unavailable</span>
         </SettingRow>
       )}
+      <SettingRow
+        label="Response"
+        description="How small an output buffer to ask for. Lowest is the most immediate and the most likely to crackle on a busy machine; raise it if previews break up. The hardware buffer is shared, so a DAW holding the device can cap how low this goes — Audio diagnostics below shows what you actually got."
+      >
+        <Select
+          value={latency}
+          options={LATENCY_OPTIONS}
+          onChange={(v) => {
+            setLatency(v as LatencyChoice);
+            audioEngine.setPreferredLatency(v as LatencyChoice);
+          }}
+        />
+      </SettingRow>
       <SettingRow
         label="Sample rate"
         description="Higher rates can sound cleaner but use more CPU. Changing this restarts the audio engine."
