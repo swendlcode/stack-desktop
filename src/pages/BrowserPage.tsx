@@ -79,7 +79,10 @@ export function BrowserPage() {
         )}
 
         {/* Toolbar + column header — optionally sticky */}
-        <div className={stickyToolbar ? 'sticky top-0 z-10' : undefined}>
+        <div
+          className={stickyToolbar ? 'sticky top-0 z-10' : undefined}
+          {...(stickyToolbar ? { 'data-sticky-overlay': '' } : {})}
+        >
           <BrowserToolbar
             resultCount={totalCount}
             showPathChip={!filters.pathPrefix}

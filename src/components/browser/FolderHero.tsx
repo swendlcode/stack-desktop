@@ -59,7 +59,7 @@ export function FolderHero({ pathPrefix, totalCount }: Props) {
         aria-label="Edit folder cover"
       >
         <PackCover packRoot={pathPrefix} packName={folderName} size={72} />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-transparent opacity-0 transition-all group-hover:bg-stack-fire group-hover:opacity-100">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] bg-black/25 opacity-0 backdrop-blur-md transition-opacity group-hover:opacity-100">
           <Edit2 size={20} color="#ffffff" variant="Bold" />
         </div>
       </button>

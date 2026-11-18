@@ -27,7 +27,13 @@ export function TitleBar() {
   const settingsActive = activePage === 'settings';
   const startWindowDrag = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    getCurrentWindow().startDragging().catch(() => {});
+    // `getCurrentWindow()` throws synchronously outside a Tauri webview, so
+    // the promise catch alone does not cover browser mode.
+    try {
+      getCurrentWindow().startDragging().catch(() => {});
+    } catch {
+      /* browser mode — the OS window is not ours to move */
+    }
   };
 
   // Optimistic flip: paint instantly via DOM + cache, then persist.

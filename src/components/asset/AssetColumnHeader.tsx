@@ -61,6 +61,11 @@ export function AssetColumnHeader({
 
   return (
     <div
+      // Pinned over the top of the scrolled list, so it hides whatever is
+      // behind it. AssetGrid reads this attribute to know how much of the
+      // view is covered before deciding a row is on screen — without it, a
+      // row scrolled "to the top" lands underneath this bar.
+      data-sticky-overlay=""
       className="sticky top-0 z-10 flex shrink-0 items-center border-b border-gray-700 bg-gray-900 px-2 sm:px-3"
       style={{ height: 32 }}
       onContextMenu={(e) => {

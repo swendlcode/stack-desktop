@@ -224,7 +224,31 @@ export const AssetRow = memo(function AssetRow({
     try {
       await assetService.toggleFavorite(asset.id);
     } finally {
-      qc.invalidateQueries({ queryKey: assetQueryKeys.all });
+      // Deliberately NOT `assetQueryKeys.all`.
+      //
+      // Invalidating every asset query re-runs the open list query, and the
+      // list that comes back is not the list that went out: the default sort
+      // is "Recently played", `increment_play_count` writes `last_played` on
+      // every audition, so whatever the user was listening to is ranked first
+      // by the time the refetch lands. It moves to the top, the selection
+      // follows it there, and the view jumps with it — from a click on a
+      // heart.
+      //
+      // Nothing about a favourite requires that query to run again. The flag
+      // is already flipped in every cached list above, which is the whole of
+      // what changed. Only two things genuinely need the server: this asset's
+      // own detail row, and favourites-only lists, whose membership is what
+      // was just edited.
+      qc.invalidateQueries({ queryKey: assetQueryKeys.byId(asset.id) });
+      qc.invalidateQueries({
+        queryKey: assetQueryKeys.all,
+        predicate: (query) => {
+          const key = query.queryKey as unknown[];
+          if (key[1] !== "search") return false;
+          const filters = key[2] as Record<string, unknown> | undefined;
+          return filters?.favoritesOnly === true;
+        },
+      });
     }
   };
 

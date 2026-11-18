@@ -13,7 +13,14 @@ interface DropdownProps {
   label: ReactNode;
   /** Whether any filter inside is active — highlights the trigger */
   active?: boolean;
-  children: ReactNode;
+  /**
+   * The panel's contents. A function receives `close`, for a panel whose own
+   * controls finish the job — anything with an Apply button, or a field where
+   * Enter means "that's my answer". Without it the panel can only be
+   * dismissed by clicking away from it, which reads as the button having
+   * done nothing.
+   */
+  children: ReactNode | ((close: () => void) => ReactNode);
   /** Min-width of the panel in px */
   minWidth?: number;
   /** Alignment of the dropdown panel */
@@ -138,7 +145,7 @@ export function Dropdown({
             }}
             className="fixed z-50 rounded-xl border border-gray-700 bg-gray-900 shadow-2xl shadow-black/40"
           >
-            {children}
+            {typeof children === 'function' ? children(() => setOpen(false)) : children}
           </div>,
           document.body
         )}
@@ -166,15 +173,51 @@ export function DropdownSection({
   );
 }
 
+/** Clears whatever the panel filters. Always the left-hand action. */
+export function DropdownClear({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-lg px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-stack-white"
+    >
+      Clear
+    </button>
+  );
+}
+
+/**
+ * Dismisses the panel. Always the right-hand action, and deliberately not
+ * styled as an accent button: it commits nothing. These panels apply as you
+ * click, so this only puts the list back in view.
+ */
+export function DropdownClose({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-lg border border-gray-600 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-800 hover:text-stack-white"
+    >
+      Close
+    </button>
+  );
+}
+
 /** Divider between sections */
 export function DropdownDivider() {
   return <div className="h-px bg-gray-700/80" />;
 }
 
-/** Row of action buttons at the bottom of a dropdown */
+/**
+ * Row of action buttons at the bottom of a dropdown.
+ *
+ * Two sides, not one. Clearing a filter and dismissing the panel are opposite
+ * intentions and had been sitting next to each other on the right, where the
+ * only button present — "Clear" — was in the position the eye reads as "done
+ * here". Undoing your own filter is the last thing that should be under the
+ * cursor at the moment you want to close.
+ */
 export function DropdownActions({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-center justify-end gap-2 border-t border-gray-700 px-3 py-2">
+    <div className="flex items-center justify-between gap-2 border-t border-gray-700 px-3 py-2">
       {children}
     </div>
   );

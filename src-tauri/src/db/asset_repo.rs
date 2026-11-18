@@ -804,7 +804,7 @@ impl AssetRepository {
              meta, index_status, bpm_source, key_source, NULL AS waveform_data, \
              energy_level, texture, space, role, \
              created_at, updated_at, genre \
-             FROM assets WHERE pack_id = ?1 ORDER BY filename COLLATE NOCASE LIMIT ?2 OFFSET ?3",
+             FROM assets WHERE pack_id = ?1 ORDER BY filename COLLATE NOCASE, id ASC LIMIT ?2 OFFSET ?3",
         )?;
         let assets = stmt
             .query_map(params![pack_id, limit, offset], row_to_asset)?

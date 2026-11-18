@@ -105,8 +105,17 @@ pub async fn get_pack_cover(pack_root: String) -> Result<Option<String>> {
     Ok(None)
 }
 
-/// Nearest ancestor's user-set artwork. Bounded so a stray path can't walk to
-/// the filesystem root, and stops at the user's home directory.
+/// Nearest ancestor's artwork. Bounded so a stray path can't walk to the
+/// filesystem root, and stops at the user's home directory.
+///
+/// This looks for the same things the pack root itself does, minus the nested
+/// `Cover/` scan. It used to look only for `.stack/cover.*` — user-set
+/// artwork — which is the rarest of the three: in a real library the artwork
+/// is a macOS folder icon the vendor shipped or the user set in Get Info, so
+/// browsing one level below a pack that visibly has a cover in Finder showed
+/// a grey square. The nested scan is the one thing left out on purpose: it
+/// costs a `read_dir` per hop, and an ancestor here can be a directory
+/// holding a thousand pack folders.
 fn find_inherited_cover(root: &Path) -> Option<PathBuf> {
     const MAX_HOPS: usize = 12;
     let home = std::env::var("HOME").ok().map(PathBuf::from);
@@ -117,6 +126,18 @@ fn find_inherited_cover(root: &Path) -> Option<PathBuf> {
         }
         if let Some(found) = find_user_cover(current) {
             return Some(found);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(finder) = export_macos_finder_icon(current) {
+                return Some(finder);
+            }
+        }
+        for name in LEGACY_COVER_NAMES {
+            let candidate = current.join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
         current = current.parent()?;
     }

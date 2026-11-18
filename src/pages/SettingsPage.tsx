@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { versionLabel } from '../utils/appBuild';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { libraryService } from '../services/libraryService';
 import { settingsService } from '../services/settingsService';
-import { audioEngine, type LatencyChoice } from '../services/audioEngine';
+import { audioEngine } from '../services/audioEngine';
 import { usePlayerStore } from '../stores/playerStore';
 import { Button } from '../components/ui/Button';
 import {
@@ -190,121 +191,12 @@ function FolderInfoRow({ folder, onRemove }: { folder: WatchedFolder; onRemove: 
 }
 
 // ─── Audio output ────────────────────────────────────────────────────────────────
-// Output device + sample-rate selection. Sample rate always works (rebuilds the
-// AudioContext). Output-device routing depends on setSinkId, which WKWebView may
-// not support — so that control is shown only when the runtime can actually use it.
-
-const LATENCY_OPTIONS = [
-  { value: 'interactive', label: 'Lowest' },
-  { value: 'balanced', label: 'Balanced' },
-  { value: 'playback', label: 'Most stable' },
-];
-
-const SAMPLE_RATE_OPTIONS = [
-  { value: '', label: 'System default' },
-  { value: '44100', label: '44.1 kHz' },
-  { value: '48000', label: '48 kHz' },
-  { value: '88200', label: '88.2 kHz' },
-  { value: '96000', label: '96 kHz' },
-];
-
-function AudioOutputSettings() {
-  const supportsOutput = audioEngine.supportsOutputSelection();
-  const [devices, setDevices] = useState<Array<{ deviceId: string; label: string }>>([]);
-  const [sinkId, setSinkId] = useState<string>(() => audioEngine.getPreferredSinkId() ?? '');
-  const [sampleRate, setSampleRate] = useState<string>(
-    () => String(audioEngine.getPreferredSampleRate() ?? '')
-  );
-  const [latency, setLatency] = useState<LatencyChoice>(() => audioEngine.getPreferredLatency());
-
-  const [unlocking, setUnlocking] = useState(false);
-
-  useEffect(() => {
-    if (!supportsOutput) return;
-    audioEngine.listOutputDevices().then(setDevices).catch(() => {});
-  }, [supportsOutput]);
-
-  const usableDevices = devices.filter((d) => d.deviceId && d.deviceId !== 'default');
-  const deviceOptions = [
-    { value: '', label: 'System default' },
-    ...usableDevices.map((d, i) => ({ value: d.deviceId, label: d.label || `Output ${i + 1}` })),
-  ];
-
-  const labelsHidden = supportsOutput && devices.some((d) => d.deviceId && !d.label);
-  const needsUnlock = supportsOutput && (usableDevices.length === 0 || labelsHidden);
-
-  const unlock = async () => {
-    setUnlocking(true);
-    try {
-      setDevices(await audioEngine.unlockOutputDevices());
-    } finally {
-      setUnlocking(false);
-    }
-  };
-
-  return (
-    <SettingSection
-      title="Audio output"
-      description="Where previews play, how quickly, and at what sample rate."
-    >
-      {supportsOutput ? (
-        <SettingRow
-          label="Output device"
-          description={
-            needsUnlock
-              ? 'macOS only reveals device names after granting audio access. Stack uses it solely to label outputs — it never records.'
-              : 'Send sample previews to a specific output.'
-          }
-        >
-          {needsUnlock ? (
-            <Button variant="secondary" size="sm" onClick={unlock} disabled={unlocking}>
-              {unlocking ? 'Requesting…' : 'Show devices'}
-            </Button>
-          ) : (
-            <Select
-              value={sinkId}
-              options={deviceOptions}
-              onChange={(v) => { setSinkId(v); audioEngine.setOutputDevice(v || null); }}
-            />
-          )}
-        </SettingRow>
-      ) : (
-        <SettingRow
-          label="Output device"
-          description="This system doesn't let the app pick an output device. Previews follow your Mac's default output (change it in System Settings → Sound)."
-        >
-          <span className="mono text-xs text-gray-500">Unavailable</span>
-        </SettingRow>
-      )}
-      <SettingRow
-        label="Response"
-        description="How small an output buffer to ask for. Lowest is the most immediate and the most likely to crackle on a busy machine; raise it if previews break up. The hardware buffer is shared, so a DAW holding the device can cap how low this goes — Audio diagnostics below shows what you actually got."
-      >
-        <Select
-          value={latency}
-          options={LATENCY_OPTIONS}
-          onChange={(v) => {
-            setLatency(v as LatencyChoice);
-            audioEngine.setPreferredLatency(v as LatencyChoice);
-          }}
-        />
-      </SettingRow>
-      <SettingRow
-        label="Sample rate"
-        description="Higher rates can sound cleaner but use more CPU. Changing this restarts the audio engine."
-      >
-        <Select
-          value={sampleRate}
-          options={SAMPLE_RATE_OPTIONS}
-          onChange={(v) => {
-            setSampleRate(v);
-            audioEngine.setPreferredSampleRate(v ? Number(v) : null);
-          }}
-        />
-      </SettingRow>
-    </SettingSection>
-  );
-}
+// There are no audio settings any more. Output device, sample rate and buffer
+// length were all here, and none of them belonged in front of someone who
+// just wants to hear a sample: every one of them can be set to a value that
+// makes previews worse, and none of them can be judged without knowing what
+// the device is already doing. The engine asks the platform for its
+// interactive defaults and follows the system output, the way Splice does.
 
 // ─── Audio diagnostics ──────────────────────────────────────────────────────────
 // Surfaces the audio engine's live state so users on machines where preview is
@@ -314,6 +206,8 @@ function AudioOutputSettings() {
 function AudioDiagnostics() {
   const [snap, setSnap] = useState(() => audioEngine.debugSnapshot());
   const [toneResult, setToneResult] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [verbose, setVerbose] = useState<boolean>(() => {
     try { return localStorage.getItem('stack:audioDebug') === '1'; } catch { return false; }
   });
@@ -328,6 +222,34 @@ function AudioDiagnostics() {
       setToneResult(`error: ${String(e)}`);
     }
     refresh();
+  };
+
+  /**
+   * The way out of a wedged engine that does not involve quitting the app.
+   *
+   * Until this existed the only cure for "the sound is gone and stays gone"
+   * was a restart, which is both the worst possible answer during a session
+   * and the thing that destroys the evidence of what went wrong.
+   */
+  const restart = async () => {
+    setBusy(true);
+    setToneResult('');
+    try {
+      await audioEngine.restartEngine();
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+
+  const copyLog = async () => {
+    try {
+      await navigator.clipboard.writeText(audioEngine.recentLog());
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard refused — nothing useful to say about it here */
+    }
   };
 
   const toggleVerbose = (v: boolean) => {
@@ -346,12 +268,17 @@ function AudioDiagnostics() {
     ['Output latency', snap.outputLatency != null ? `${(snap.outputLatency * 1000).toFixed(1)} ms` : '—'],
     ['User gesture active', snap.userActivationActive === null ? 'unknown' : String(snap.userActivationActive)],
     ['Decoded in cache', String(snap.cacheSize)],
+    // The one number that says whether the context is alive rather than
+    // merely claiming to be: a clock that has not moved is a dead output,
+    // whatever the state above reads.
+    ['Clock last moved', snap.clockAgeMs == null ? 'not yet' : `${snap.clockAgeMs} ms ago`],
+    ['Recovering', snap.recovering ? 'yes' : 'no'],
   ];
 
   return (
     <SettingSection
       title="Audio diagnostics"
-      description="If preview playback is silent, click Test tone and send us these values."
+      description="If previews go silent, Restart audio rebuilds the engine without closing Stack. Copy log carries the last few hundred audio events, including what happened before the silence."
     >
       <div className="rounded-md border border-gray-700 bg-gray-800 p-4">
         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -363,7 +290,13 @@ function AudioDiagnostics() {
           ))}
         </div>
         <div className="mt-4 flex items-center gap-2">
-          <Button variant="primary" size="sm" onClick={runTone}>Test tone</Button>
+          <Button variant="primary" size="sm" onClick={runTone} disabled={busy}>Test tone</Button>
+          <Button variant="secondary" size="sm" onClick={restart} disabled={busy}>
+            {busy ? 'Restarting…' : 'Restart audio'}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={copyLog}>
+            {copied ? 'Copied' : 'Copy log'}
+          </Button>
           <Button variant="secondary" size="sm" onClick={refresh}>Refresh</Button>
           {toneResult && <span className="mono text-xs text-gray-400">{toneResult}</span>}
         </div>
@@ -742,16 +675,13 @@ export function SettingsPage() {
           </SettingRow>
         </SettingSection>
 
-        {/* ── Audio output ── */}
-        <AudioOutputSettings />
-
         {/* ── Audio diagnostics ── */}
         <AudioDiagnostics />
 
         {/* ── About ── */}
         <SettingSection title="About">
           <div className="rounded-md border border-gray-700 bg-gray-800 p-4 text-sm text-gray-300 space-y-2">
-            <div><span className="text-gray-500">Version </span><span className="mono">{appVersion || '—'}</span></div>
+            <div><span className="text-gray-500">Version </span><span className="mono">{appVersion ? versionLabel(appVersion) : '—'}</span></div>
             <div><span className="text-gray-500">Stack </span><span className="mono">Tauri 2 · React 18 · SQLite · Rust</span></div>
             <div className="pt-2">
               <Button

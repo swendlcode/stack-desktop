@@ -48,7 +48,24 @@ pub fn build_search(filters: &AssetFilters, sort: &SortOptions, limit: i64, offs
         sql.push_str(" ORDER BY RANDOM() LIMIT ? OFFSET ?");
     } else {
         let direction = if sort.direction.eq_ignore_ascii_case("desc") { "DESC" } else { "ASC" };
-        sql.push_str(&format!(" ORDER BY {} {} LIMIT ? OFFSET ?", order_col, direction));
+        // `id` is the tiebreaker, and it is not decoration. Every sort column
+        // here has ties, and the default one is the worst of them: ordering by
+        // `last_played` leaves every sample that has never been played in a
+        // single NULL group — most of the library. Without a second term
+        // SQLite is free to return a tied group in whatever order the scan
+        // happens to produce, and that order changes whenever a row is
+        // rewritten. Favouriting a sample is such a rewrite, so the list came
+        // back reshuffled and the row the user had just clicked was somewhere
+        // else, or on another page entirely: "I clicked Favorite and it
+        // disappeared".
+        //
+        // It costs nothing to prevent. SQLite satisfies the leading term from
+        // its index and only sorts within each tied block, so the paging stays
+        // on the same indexes it used before.
+        sql.push_str(&format!(
+            " ORDER BY {} {}, id ASC LIMIT ? OFFSET ?",
+            order_col, direction
+        ));
     }
     params.push(Value::Integer(limit));
     params.push(Value::Integer(offset));

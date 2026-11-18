@@ -1,4 +1,10 @@
-import { Dropdown, DropdownDivider, DropdownActions } from '../ui/Dropdown';
+import {
+  Dropdown,
+  DropdownDivider,
+  DropdownActions,
+  DropdownClear,
+  DropdownClose,
+} from '../ui/Dropdown';
 import { useFilterStore } from '../../stores/filterStore';
 import { useFacetCounts } from '../../hooks/useFacetCounts';
 
@@ -33,6 +39,8 @@ export function LoopTypeDropdown() {
 
   return (
     <Dropdown label={label} active={isActive} minWidth={230}>
+      {(close) => (
+        <>
       <div className="py-1">
         {OPTIONS.map((o) => {
           const active = selected === o.value;
@@ -63,17 +71,11 @@ export function LoopTypeDropdown() {
         })}
       </div>
 
-      {isActive && (
-        <>
-          <DropdownDivider />
-          <DropdownActions>
-            <button
-              onClick={() => setFilters([])}
-              className="rounded-lg px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-stack-white"
-            >
-              Clear
-            </button>
-          </DropdownActions>
+      <DropdownDivider />
+      <DropdownActions>
+        {isActive ? <DropdownClear onClick={() => setFilters([])} /> : <span />}
+        <DropdownClose onClick={close} />
+      </DropdownActions>
         </>
       )}
     </Dropdown>

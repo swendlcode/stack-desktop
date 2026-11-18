@@ -57,15 +57,25 @@ export function applyZoom(factor: number): number {
   } catch {
     /* private mode — the zoom still applies, it just won't be remembered */
   }
-  getCurrentWebviewWindow()
-    .setZoom(next)
-    .catch(() => {
-      // Not a Tauri webview (browser mode over the embedded HTTP server), or
-      // the platform refused. The CSS property is WebKit/Blink-supported and
-      // scales the same way; it is the fallback, not the primary, because it
-      // reflows a little differently around fixed positioning.
-      document.documentElement.style.zoom = String(next);
-    });
+  // The CSS property is WebKit/Blink-supported and scales the same way; it is
+  // the fallback, not the primary, because it reflows a little differently
+  // around fixed positioning.
+  const cssZoom = () => {
+    document.documentElement.style.zoom = String(next);
+  };
+  try {
+    getCurrentWebviewWindow().setZoom(next).catch(cssZoom);
+  } catch {
+    // `getCurrentWebviewWindow()` **throws synchronously** outside a Tauri
+    // webview — it reads `window.__TAURI_INTERNALS__.metadata`, and in a
+    // plain browser tab there is no `__TAURI_INTERNALS__` at all. Catching
+    // only the rejected promise was catching the wrong failure: the throw
+    // happened before there was a promise to reject, escaped `applyZoom`,
+    // escaped `initZoom()` at startup, and took the whole page down with
+    // "Cannot read properties of undefined (reading 'metadata')". Stack over
+    // the network never rendered a single pixel.
+    cssZoom();
+  }
   window.dispatchEvent(new CustomEvent('stack:zoom-changed', { detail: { zoom: next } }));
   return next;
 }

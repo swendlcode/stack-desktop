@@ -154,6 +154,12 @@ export function usePlayer() {
   // for its metadata to arrive.
   const fallbackSrcRef = useRef<string | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
+  /** The object URL the element is holding, so it can be released. */
+  const fallbackUrlRef = useRef<string | null>(null);
+  /** The path whose blob has finished loading into the element. */
+  const fallbackReadyRef = useRef<string | null>(null);
+  /** What the element has been asked to play, if anything. */
+  const fallbackWantRef = useRef<{ path: string; offset: number } | null>(null);
 
   /**
    * Get the HTML element ready to play `path` without actually playing it.
@@ -175,11 +181,28 @@ export function usePlayer() {
    */
   const stopFallback = () => {
     pendingSeekRef.current = null;
+    fallbackWantRef.current = null;
     if (!fallbackActiveRef.current) return;
     audioRef.current?.pause();
     fallbackActiveRef.current = false;
   };
 
+  /**
+   * Load `path` into the element — as a blob, not as an asset URL.
+   *
+   * This is the correction to a false assumption the whole fallback was built
+   * on. `convertFileSrc` returns an `asset://` URL, and WKWebView's media
+   * loader cannot read custom schemes: `fetch` can (which is why decoding has
+   * always worked) but `<audio>` cannot. Every single element start this app
+   * has ever attempted was refused with `NotSupportedError` — the log says so,
+   * 0 successes against 2 recorded refusals, and the refusal was silent until
+   * an hour ago. The "safety net" was a sure thing that never caught anything.
+   *
+   * The bytes are fetched the same way the decoder fetches them, which is
+   * proven to work, and handed to the element as an object URL, which it can
+   * read. Loading on selection rather than at the click keeps the handover
+   * free when it is needed.
+   */
   const primeFallback = (path: string) => {
     const audio = audioRef.current;
     if (!audio || fallbackSrcRef.current === path) return;
@@ -187,9 +210,105 @@ export function usePlayer() {
     // one on its `loadedmetadata`, starting it at the wrong place.
     pendingSeekRef.current = null;
     fallbackSrcRef.current = path;
-    audio.src = convertFileSrc(path);
-    audio.load();
+    fallbackReadyRef.current = null;
+    void (async () => {
+      try {
+        const res = await fetch(convertFileSrc(path));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        // Another sample was selected while this was loading.
+        if (fallbackSrcRef.current !== path) return;
+        const url = URL.createObjectURL(blob);
+        if (fallbackUrlRef.current) URL.revokeObjectURL(fallbackUrlRef.current);
+        fallbackUrlRef.current = url;
+        audio.src = url;
+        audio.load();
+        fallbackReadyRef.current = path;
+        const want = fallbackWantRef.current;
+        if (want && want.path === path) playFallbackRef.current(want.path, want.offset);
+      } catch (err) {
+        audioEngine.note('element:load-failed', { path, err: String(err) });
+      }
+    })();
   };
+
+  /** Actually press play on the element, once it has something to play. */
+  const playFallbackNow = (path: string, offset: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    // The engine may have won the race while the blob was loading.
+    if (audioEngine.isPlayingPath(path)) {
+      fallbackWantRef.current = null;
+      return;
+    }
+    audio.volume = volumeRef.current;
+    // Seeking before the element has metadata is ignored, so hold the offset
+    // until `loadedmetadata` if it is not ready yet.
+    if (audio.readyState > 0) {
+      try {
+        audio.currentTime = offset;
+      } catch {
+        pendingSeekRef.current = offset;
+      }
+    } else if (offset > 0) {
+      pendingSeekRef.current = offset;
+    }
+    audio
+      .play()
+      .then(() => {
+        // Claiming the sample before it was playing is what made a refused
+        // element start fatal: `fallbackActiveRef` going true cancelled the
+        // engine's start — `playAsync:no-longer-wanted` in the log — and then
+        // the element failed, so neither route made a sound and the app was
+        // silent until it was restarted. The claim now follows the sound.
+        if (audioEngine.isPlayingPath(path)) {
+          audio.pause();
+          return;
+        }
+        fallbackActiveRef.current = true;
+      })
+      .catch((err: unknown) => {
+        fallbackActiveRef.current = false;
+        audioEngine.note('element:refused', {
+          path,
+          err: err instanceof Error ? err.name : String(err),
+        });
+        // Hand it back. The engine was told this sample was no longer wanted
+        // the moment the element took it, so nothing is holding it any more —
+        // and by now its context has usually finished resuming.
+        const state = usePlayerStore.getState();
+        if (state.currentAsset?.path !== path || !state.isPlaying) return;
+        audioEngine
+          .playBufferAsync(path, offset, () => {
+            const live = usePlayerStore.getState();
+            return live.currentAsset?.path === path && live.isPlaying;
+          })
+          .catch(() => {});
+      });
+  };
+  const playFallbackRef = useRef(playFallbackNow);
+  playFallbackRef.current = playFallbackNow;
+
+  /**
+   * Put a sample through the HTML element.
+   *
+   * The engine's path and this one both exist because either can be the only
+   * one working: the element does not depend on an AudioContext, so it keeps
+   * making sound through exactly the WebKit interruption that kills the
+   * engine. This is the single place that starts it, so every caller gets the
+   * same pending-seek handling and the same honest `fallbackActiveRef`.
+   */
+  const startFallback = (path: string, offset: number) => {
+    if (!audioRef.current) return;
+    fallbackWantRef.current = { path, offset };
+    primeFallback(path);
+    // Already loaded — the usual case, because selecting the sample primed it.
+    if (fallbackReadyRef.current === path) playFallbackNow(path, offset);
+  };
+  // Callbacks registered once would otherwise close over the first render's
+  // copy of this.
+  const startFallbackRef = useRef(startFallback);
+  startFallbackRef.current = startFallback;
 
   // Shared AudioContext for MIDI — reused across plays to avoid the browser's
   // ~6 context limit. Closed only when the hook unmounts.
@@ -213,6 +332,34 @@ export function usePlayer() {
   // Stable refs so effects don't re-run when these change
   const volumeRef = useRef(0.8);
   const pausedAtRef = useRef(0); // where we paused for the current sample
+  // How long the engine gets to make a sound before the element is used
+  // instead. Short enough that it cannot be heard as a delay, long enough for
+  // a context resumed inside the click to come back on its own.
+  //
+  // 70ms was measured to be just too tight. Both recorded silences have the
+  // same shape: no context at all, one constructed, and `ctx:resume` settling
+  // ~90ms later — twenty milliseconds after the element had already been
+  // handed the sample. The engine is the better route when it can take it at
+  // all (no second decode, no second copy of the file), so it gets past where
+  // a resume actually lands. Still under the 150ms that counts as slow.
+  const ENGINE_GRACE_MS = 120;
+  // When the user last actually asked for sound. A context that comes back
+  // minutes later must not resurrect what was playing when it went away.
+  const playRequestedAtRef = useRef(0);
+
+  /**
+   * Is this engine start still the one the user wants, right now?
+   *
+   * Handed to every asynchronous start. A start that parks on a context
+   * resume can wake up long after the user has moved on, and the engine's own
+   * ticket cannot see a click it never received — only the store knows what
+   * is selected and whether it is meant to be playing.
+   */
+  const stillWanted = (assetId: string, gen: number) => () => {
+    if (generationRef.current !== gen) return false;
+    const state = usePlayerStore.getState();
+    return state.currentAsset?.id === assetId && state.isPlaying;
+  };
   // Last `stopSeq` acted on, so a stop can be told apart from a pause.
   const stopSeqRef = useRef(0);
 
@@ -508,10 +655,57 @@ export function usePlayer() {
       if (!asset || asset.type !== 'sample' || !state.isPlaying) return;
       if (fallbackActiveRef.current) return;
       if (audioEngine.isPlayingPath(asset.path)) return;
-      audioEngine.playBufferAsync(asset.path, pausedAtRef.current).catch(() => {});
+      // `isPlaying` is not proof that anything is wanted. A stalled context
+      // never fires `onended`, so a sample that was mid-play when the user
+      // swiped to another desktop stays "playing" the entire time they are
+      // away — this is the same stale-intent bug the engine's old
+      // `currentPath` replay had, just one layer up. Restart only something
+      // asked for in the last couple of seconds; otherwise admit it stopped.
+      if (performance.now() - playRequestedAtRef.current > 2000) {
+        usePlayerStore.getState().pause();
+        return;
+      }
+      audioEngine
+        .playBufferAsync(asset.path, pausedAtRef.current, stillWanted(asset.id, generationRef.current))
+        .catch(() => {});
     };
 
+    // A source started and was not heard. The engine is repairing itself;
+    // meanwhile the sample the user asked for can still come out of the
+    // element, which does not depend on the context at all.
+    audioEngine.onStartFailed = (path) => {
+      const state = usePlayerStore.getState();
+      const asset = state.currentAsset;
+      if (!asset || asset.type !== 'sample' || !state.isPlaying) return;
+      if (asset.path !== path || fallbackActiveRef.current) return;
+      startFallbackRef.current(asset.path, pausedAtRef.current);
+    };
+
+    // The engine cannot check this for itself: it knows the path it started,
+    // not the sample on screen. If those disagree, the user is hearing one
+    // thing and looking at another — the whole of the "it played the bottom
+    // one" report — and this is the line in the log that proves it.
+    const onEngineStart = (e: Event) => {
+      const started = (e as CustomEvent<{ path: string }>).detail?.path;
+      const shown = usePlayerStore.getState().currentAsset?.path ?? null;
+      if (started && shown && started !== shown) {
+        audioEngine.note('start:mismatch', { started, shown });
+      }
+    };
+    window.addEventListener('audioEnginePlaybackStart', onEngineStart);
+
     // Fallback HTML audio events
+    // The element reaching 'playing' is the moment sound starts on that path,
+    // measured against the same request the engine is measured against — so
+    // the log can say which route a delayed play took and how long it cost.
+    const onFallbackPlaying = () => {
+      const path = fallbackSrcRef.current;
+      if (!path) return;
+      // `playing` can beat the `play()` promise, so this is also where the
+      // element's claim on the sample becomes true.
+      if (fallbackWantRef.current?.path === path) fallbackActiveRef.current = true;
+      if (fallbackActiveRef.current) audioEngine.noteAudible(path, 'element');
+    };
     const onFallbackTime = () => {
       if (fallbackActiveRef.current) setCurrentTime(audio.currentTime);
     };
@@ -532,6 +726,7 @@ export function usePlayer() {
         handleTrackEndRef.current();
       }
     };
+    audio.addEventListener('playing', onFallbackPlaying);
     audio.addEventListener('timeupdate', onFallbackTime);
     audio.addEventListener('loadedmetadata', onFallbackMeta);
     audio.addEventListener('ended', onFallbackEnd);
@@ -557,11 +752,15 @@ export function usePlayer() {
         audioRef.current.currentTime = time;
       } else if (usePlayerStore.getState().isPlaying && current) {
         audioEngine.stop();
-        audioEngine.playBufferAsync(current.path, time).catch(() => {});
+        audioEngine
+          .playBufferAsync(current.path, time, stillWanted(current.id, generationRef.current))
+          .catch(() => {});
       }
     });
 
     return () => {
+      window.removeEventListener('audioEnginePlaybackStart', onEngineStart);
+      audio.removeEventListener('playing', onFallbackPlaying);
       audio.removeEventListener('timeupdate', onFallbackTime);
       audio.removeEventListener('loadedmetadata', onFallbackMeta);
       audio.removeEventListener('ended', onFallbackEnd);
@@ -569,6 +768,10 @@ export function usePlayer() {
       audioEngine.onDuration = null;
       audioEngine.onEnded = null;
       audioEngine.onContextRestored = null;
+      if (fallbackUrlRef.current) {
+        URL.revokeObjectURL(fallbackUrlRef.current);
+        fallbackUrlRef.current = null;
+      }
       stopMidiNodes();
       // Close the shared MIDI context on unmount
       if (midiCtxRef.current && midiCtxRef.current.state !== 'closed') {
@@ -651,17 +854,32 @@ export function usePlayer() {
         } else if (fallbackActiveRef.current && audioRef.current) {
           pausedAtRef.current = wasStopped ? 0 : audioRef.current.currentTime;
           stopFallback();
+          // Not only the element. A start can be parked inside the engine
+          // waiting for a context; `stop()` is what tells it that whatever it
+          // is holding is no longer wanted. Calling it only when the engine
+          // was already making sound left those starts live, to be heard
+          // minutes later over whatever is selected by then.
+          audioEngine.stop();
         } else {
           if (wasStopped) pausedAtRef.current = 0;
+          audioEngine.stop();
           // Not playing anything — just prefetch so it's ready when resumed.
-          // Both paths are primed, not only the engine: after the app has been
-          // in the background the engine may not be the one that answers, and
-          // an unprimed element is the audible lag.
           audioEngine.prefetch(currentAsset.path);
-          primeFallback(currentAsset.path);
+          // The element is primed only when the engine is in no state to
+          // answer. It used to be primed on every selection, on the reasoning
+          // that an unprimed element is the audible lag — true when priming
+          // was setting a `src`. It now reads the whole file into a blob, and
+          // doing that for every sample the user lands on is a second full
+          // read of a file that is already being decoded, for a route that
+          // will not be used while the engine is alive.
+          if (!audioEngine.isOutputLive()) primeFallback(currentAsset.path);
         }
         return;
       }
+
+      // From here on the user has asked for sound, now. Recorded so a context
+      // that comes back much later can tell a live request from a stale one.
+      playRequestedAtRef.current = performance.now();
 
       // Playing — check if the engine is already playing THIS EXACT asset.
       // This happens when the arrow-key / click handler called playBuffer()
@@ -702,14 +920,44 @@ export function usePlayer() {
       // deciding where this one goes.
       stopFallback();
 
-      // A decoded buffer with no context is NOT a reason to use the element.
-      // The sample is already in memory; all that is missing is somewhere to
-      // play it, and asking for a context here resumes it inside the user's
-      // own gesture — the one moment WebKit reliably grants one. Loading the
-      // file into an <audio> element instead is what made every first play
-      // after a DAW arrive late.
+      // The buffer is in memory and only the context is missing. Both routes
+      // to sound are imperfect here, so race them rather than choosing:
+      //
+      //  - Waiting for the engine can take most of a second after a desktop
+      //    switch — a bounded resume, a rebuild, another resume and a clock
+      //    probe all have to finish first.
+      //  - Going straight to the element gives that up even when the context
+      //    would have woken in a few milliseconds, which it usually does,
+      //    because this runs inside the user's own gesture and that is the
+      //    one moment WebKit reliably grants a resume.
+      //
+      // So the engine gets a short head start and the element is loaded (not
+      // played) alongside it. If the engine has not made a sound by the time
+      // the grace runs out, the element plays, instantly, because it is
+      // already loaded. Whichever starts first wins outright: `wanted` goes
+      // false once the element is live, so a late engine start is abandoned
+      // rather than played on top.
       if (audioEngine.hasBuffer(currentAsset.path)) {
-        audioEngine.playBufferAsync(currentAsset.path, offset).catch(() => {});
+        const assetId = currentAsset.id;
+        const path = currentAsset.path;
+        const wanted = () => stillWanted(assetId, gen)() && !fallbackActiveRef.current;
+        const live = audioEngine.isOutputLive();
+        if (!live) primeFallback(path);
+
+        const grace = window.setTimeout(() => {
+          if (wanted()) startFallbackRef.current(path, offset);
+        }, live ? ENGINE_GRACE_MS * 2 : ENGINE_GRACE_MS);
+
+        audioEngine
+          .playBufferAsync(path, offset, wanted)
+          .then((ok) => {
+            window.clearTimeout(grace);
+            if (!ok && wanted()) startFallbackRef.current(path, offset);
+          })
+          .catch(() => {
+            window.clearTimeout(grace);
+            if (wanted()) startFallbackRef.current(path, offset);
+          });
         assetService.incrementPlayCount(currentAsset.id).catch(() => {});
         return;
       }
@@ -718,24 +966,7 @@ export function usePlayer() {
       // is usually a no-op here because selecting the asset already loaded it;
       // that is the difference between this path being a seamless stand-in and
       // being an audible delay.
-      const audio = audioRef.current;
-      if (audio) {
-        primeFallback(currentAsset.path);
-        fallbackActiveRef.current = true;
-        audio.volume = volumeRef.current;
-        // Seeking before the element has metadata is ignored, so hold the
-        // offset until `loadedmetadata` if it is not ready yet.
-        if (audio.readyState > 0) {
-          try {
-            audio.currentTime = offset;
-          } catch {
-            pendingSeekRef.current = offset;
-          }
-        } else if (offset > 0) {
-          pendingSeekRef.current = offset;
-        }
-        audio.play().catch(() => {});
-      }
+      startFallback(currentAsset.path, offset);
 
       // Decode in background — seamlessly switch to buffer when ready
       const assetId = currentAsset.id;
@@ -746,17 +977,31 @@ export function usePlayer() {
         if (!buffer) return;
         const state = usePlayerStore.getState();
         if (state.currentAsset?.id !== assetId || !state.isPlaying) return;
-        if (!fallbackActiveRef.current) return;
 
+        // Deliberately NOT gated on the element being live.
+        //
+        // Usually it is, and this is a seamless handover. But when its
+        // `play()` was refused — which is what the first click after a cold
+        // launch looks like, the element having been given a source and a
+        // play in the same tick — nothing is making any sound at all, and
+        // this freshly decoded buffer is the only thing that can. Bailing out
+        // here is why the first sample was silent and the second was fine:
+        // the one path that could have rescued it checked whether the path
+        // that had already failed was running.
+        const wasLive = fallbackActiveRef.current;
         // Hand over ONLY if the engine actually took it. `playBuffer` returns
         // false whenever the AudioContext is not running — exactly what happens
         // after the app has been in the background — and pausing the element
         // first turned that into silence while the UI still read "playing".
         // The element keeps the sound until there is something to hand it to.
-        const resumeAt = audioRef.current?.currentTime ?? 0;
+        const resumeAt = wasLive ? (audioRef.current?.currentTime ?? 0) : offset;
         if (audioEngine.playBuffer(assetPath, resumeAt)) {
-          audioRef.current?.pause();
+          if (wasLive) audioRef.current?.pause();
           fallbackActiveRef.current = false;
+        } else if (!wasLive) {
+          // Neither route has made a sound. The element is at least loaded by
+          // now, which is the condition its first attempt did not have.
+          startFallbackRef.current(assetPath, offset);
         }
       });
 

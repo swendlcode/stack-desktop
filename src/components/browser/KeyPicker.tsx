@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { Dropdown, DropdownDivider, DropdownActions } from '../ui/Dropdown';
+import {
+  Dropdown,
+  DropdownDivider,
+  DropdownActions,
+  DropdownClear,
+  DropdownClose,
+} from '../ui/Dropdown';
 import { useFilterStore } from '../../stores/filterStore';
 import type { KeyScale } from '../../types';
 
@@ -78,6 +84,8 @@ export function KeyPicker() {
 
   return (
     <Dropdown label={label} active={isActive} minWidth={300}>
+      {(close) => (
+        <>
       {/* Spelling tabs */}
       <div className="flex border-b border-gray-700/70">
         {(['flat', 'sharp'] as const).map((mode) => (
@@ -143,20 +151,20 @@ export function KeyPicker() {
         </div>
       </div>
 
-      {isActive && (
-        <>
-          <DropdownDivider />
-          <DropdownActions>
-            <button
-              onClick={() => {
-                clearKeys();
-                clearScales();
-              }}
-              className="rounded-lg px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-stack-white"
-            >
-              Clear
-            </button>
-          </DropdownActions>
+      <DropdownDivider />
+      <DropdownActions>
+        {isActive ? (
+          <DropdownClear
+            onClick={() => {
+              clearKeys();
+              clearScales();
+            }}
+          />
+        ) : (
+          <span />
+        )}
+        <DropdownClose onClick={close} />
+      </DropdownActions>
         </>
       )}
     </Dropdown>

@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Dropdown, DropdownDivider, DropdownActions } from '../ui/Dropdown';
+import {
+  Dropdown,
+  DropdownDivider,
+  DropdownActions,
+  DropdownClear,
+  DropdownClose,
+} from '../ui/Dropdown';
 import { Checkbox } from '../ui/Checkbox';
 import { SearchNormal } from '../ui/icons';
 import type { FacetCount } from '../../services/assetService';
@@ -72,6 +78,8 @@ export function FacetDropdown({
 
   return (
     <Dropdown label={label} active={isActive} minWidth={260}>
+      {(close) => (
+        <>
       {live.length > searchThreshold && (
         <div className="border-b border-gray-700/70 p-2">
           <div className="flex h-8 items-center gap-2 rounded-md border border-gray-700 bg-gray-900 px-2.5">
@@ -125,17 +133,11 @@ export function FacetDropdown({
         )}
       </div>
 
-      {isActive && (
-        <>
-          <DropdownDivider />
-          <DropdownActions>
-            <button
-              onClick={onClear}
-              className="rounded-lg px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-stack-white"
-            >
-              Clear
-            </button>
-          </DropdownActions>
+      <DropdownDivider />
+      <DropdownActions>
+        {isActive ? <DropdownClear onClick={onClear} /> : <span />}
+        <DropdownClose onClick={close} />
+      </DropdownActions>
         </>
       )}
     </Dropdown>

@@ -47,10 +47,13 @@ function NumInput({
   value,
   placeholder,
   onChange,
+  onSubmit,
 }: {
   value: number | null;
   placeholder: string;
   onChange: (v: number | null) => void;
+  /** Enter in a one-field panel means "that is my answer" — apply and close. */
+  onSubmit?: () => void;
 }) {
   return (
     <input
@@ -60,6 +63,14 @@ function NumInput({
       onChange={(e) =>
         onChange(e.target.value === '' ? null : Number(e.target.value))
       }
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' || !onSubmit) return;
+        // The panel is a portal under document.body, so this would otherwise
+        // bubble to the window handler that owns the transport keys.
+        e.preventDefault();
+        e.stopPropagation();
+        onSubmit();
+      }}
       className="mono h-9 w-24 rounded-lg border border-gray-600 bg-gray-800 px-3 text-sm text-stack-white outline-none focus:border-stack-fire"
     />
   );
@@ -117,6 +128,8 @@ function BpmDropdown() {
 
   return (
     <Dropdown label={label} active={isActive} minWidth={300}>
+      {(close) => (
+        <>
       {/* Mode tabs */}
       <div className="flex border-b border-gray-700">
         {(['range', 'exact'] as const).map((m) => (
@@ -194,9 +207,25 @@ function BpmDropdown() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <NumInput value={draftMin} placeholder="Min" onChange={setDraftMin} />
+            <NumInput
+              value={draftMin}
+              placeholder="Min"
+              onChange={setDraftMin}
+              onSubmit={() => {
+                save();
+                close();
+              }}
+            />
             <span className="text-gray-500">–</span>
-            <NumInput value={draftMax} placeholder="Max" onChange={setDraftMax} />
+            <NumInput
+              value={draftMax}
+              placeholder="Max"
+              onChange={setDraftMax}
+              onSubmit={() => {
+                save();
+                close();
+              }}
+            />
           </div>
         </DropdownSection>
       ) : (
@@ -207,6 +236,10 @@ function BpmDropdown() {
                 value={draftExact}
                 placeholder="e.g. 128"
                 onChange={setDraftExact}
+                onSubmit={() => {
+                  save();
+                  close();
+                }}
               />
               <span className="text-sm text-gray-500">BPM</span>
             </div>
@@ -229,12 +262,17 @@ function BpmDropdown() {
           Clear
         </button>
         <button
-          onClick={save}
+          onClick={() => {
+            save();
+            close();
+          }}
           className="rounded-lg bg-stack-fire px-4 py-1.5 text-sm font-medium text-stack-black hover:opacity-90 transition-opacity"
         >
           Apply
         </button>
       </DropdownActions>
+        </>
+      )}
     </Dropdown>
   );
 }

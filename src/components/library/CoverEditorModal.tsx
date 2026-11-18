@@ -35,6 +35,10 @@ export function CoverEditorModal({ packRoot, packName, onClose }: Props) {
       const y = pos.y / scale;
       return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     };
+    // Browser mode has no Tauri webview, and `getCurrentWebview()` throws
+    // rather than returning null — inside an effect that takes the page down.
+    if (!isTauri) return;
+
     getCurrentWebview()
       .onDragDropEvent((event) => {
         const p = event.payload;

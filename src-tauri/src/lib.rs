@@ -426,6 +426,7 @@ pub fn run() {
             commands::stack_commands::remove_asset_from_stack,
             commands::stack_commands::get_stack_assets,
             commands::player_commands::decode_audio,
+            commands::player_commands::append_audio_log,
             commands::drag_commands::get_drag_icon,
             commands::drag_commands::get_drag_icon_for_pack,
             commands::drag_commands::save_export,

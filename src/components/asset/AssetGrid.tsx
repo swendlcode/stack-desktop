@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo, useState, type RefObject } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { notifyScrollActivity } from '../../hooks/useScrollActivity';
 import { useShallow } from 'zustand/react/shallow';
@@ -30,6 +30,13 @@ interface AssetGridProps {
   showColumnHeader?: boolean;
 }
 
+// How long a page-jump takes. Short enough to keep up with a held arrow key,
+// long enough that the eye follows the list instead of being teleported.
+const SCROLL_ANIM_MS = 200;
+// A click-driven scroll waits out the double-click window before it moves.
+// The list moving between the two clicks of a double-click sends the second
+// one to a different row, which opens the wrong sample's details.
+const POINTER_SCROLL_DELAY_MS = 320;
 const ROW_HEIGHT = 64;
 const COMPACT_ROW_HEIGHT = 40;
 const FOOTER_HEIGHT = 52;
@@ -123,22 +130,56 @@ export function AssetGrid({
     audioEngine.prefetchAround(assets, 0);
   }, [assets, setPlaylist]);
 
+  /**
+   * Distance from the top of the scrolled CONTENT to the top of the list.
+   *
+   * `scrollTop` is the whole point. Two rects alone give the distance on
+   * *screen*, which shrinks as you scroll and goes negative the moment the
+   * hero and toolbar pass the top edge — where `Math.max(0, …)` pinned it to
+   * zero. Every virtual row is then positioned by `start - 0` instead of
+   * `start - margin`, so the list is pushed down by the height of everything
+   * above it: a screen-high blank gap, the rows shoved off the bottom, and
+   * the row you were arrowing through nowhere to be seen.
+   *
+   * It only went wrong when something re-measured while scrolled, which is
+   * why it took entering full screen or changing the interface zoom to
+   * trigger it. Adding `scrollTop` makes the measurement independent of
+   * where the list happens to be scrolled to.
+   */
   const measureScrollMargin = useCallback(() => {
-    if (!scrollContainerRef?.current || !listViewportRef.current) {
+    const el = scrollContainerRef?.current;
+    if (!el || !listViewportRef.current) {
       setScrollMargin(0);
       return;
     }
-    const containerRect = scrollContainerRef.current.getBoundingClientRect();
+    const containerRect = el.getBoundingClientRect();
     const listRect = listViewportRef.current.getBoundingClientRect();
-    const margin = Math.max(0, Math.round(listRect.top - containerRect.top));
-    setScrollMargin(margin);
+    const margin = Math.max(
+      0,
+      Math.round(listRect.top - containerRect.top + el.scrollTop)
+    );
+    setScrollMargin((prev) => (prev === margin ? prev : margin));
   }, [scrollContainerRef]);
 
   useEffect(() => {
     measureScrollMargin();
     window.addEventListener('resize', measureScrollMargin);
-    return () => window.removeEventListener('resize', measureScrollMargin);
-  }, [measureScrollMargin]);
+    // Interface scale changes the layout without necessarily resizing the
+    // window, and anything above the list changing height moves it too.
+    window.addEventListener('stack:zoom-changed', measureScrollMargin);
+    const el = scrollContainerRef?.current;
+    const ro = el ? new ResizeObserver(() => measureScrollMargin()) : null;
+    if (el && ro) {
+      ro.observe(el);
+      // The content wrapper grows and shrinks with the hero and toolbar.
+      if (el.firstElementChild) ro.observe(el.firstElementChild);
+    }
+    return () => {
+      window.removeEventListener('resize', measureScrollMargin);
+      window.removeEventListener('stack:zoom-changed', measureScrollMargin);
+      ro?.disconnect();
+    };
+  }, [measureScrollMargin, scrollContainerRef]);
 
   const virtualizer = useVirtualizer({
     count: assets.length,
@@ -167,46 +208,230 @@ export function AssetGrid({
   }, [compactList, virtualizer]);
 
   // Set on pointer clicks so the scroll-into-view effect below knows the
-  // selection came from the mouse (row already visible — don't nudge the list).
+  // selection came from the mouse rather than from the keyboard.
   const lastPointerSelectRef = useRef(0);
+  // Tells "the selection moved" apart from "the view changed shape under a
+  // selection that did not move" — the editor opening is the second kind.
+  const prevSelectedIndexRef = useRef<number | null>(null);
 
-  // Scroll selected row into view (keyboard / external selection only)
-  useEffect(() => {
-    if (selectedIndex !== null && selectedIndex >= 0 && selectedIndex < assets.length) {
-      if (performance.now() - lastPointerSelectRef.current < 500) return;
-      const scrollEl = scrollContainerRef?.current ?? internalScrollRef.current;
-      if (!scrollEl) return;
-      const raf = window.requestAnimationFrame(() => {
-        const rowEl = scrollEl.querySelector<HTMLElement>(`[data-index="${selectedIndex}"]`);
-        if (!rowEl) {
-          // Fallback when virtual row hasn't mounted yet.
-          virtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
-          return;
-        }
-        const containerRect = scrollEl.getBoundingClientRect();
-        const rowRect = rowEl.getBoundingClientRect();
-        // Keep row within a comfortable viewport band (Splice-like behavior).
-        // When the editor is open, reserve a larger dynamic bottom safe zone.
-        // Arrow navigation can fire rapidly; use immediate correction so the
-        // selected row cannot lag and slip under the editor edge.
-        const topGuard = containerRect.top + 110;
-        const editorBottomBuffer =
-          editorAssetId !== null ? Math.max(72, Math.min(140, Math.round(editorHeight * 0.35))) : 0;
-        const bottomGuard = containerRect.bottom - (90 + editorBottomBuffer);
+  /**
+   * How much of the top of the scroll container is covered by something
+   * pinned over it.
+   *
+   * The list does not get the whole container. The toolbar band and the
+   * column header are `position: sticky` *inside* it, so they sit on top of
+   * the rows rather than beside them, and the first ~170px of the container
+   * shows whatever is pinned there, not the list.
+   *
+   * Scrolling a row to `scrollTop = rowTop` therefore does not put it at the
+   * top of the view — it puts it *behind the toolbar*, four rows up from the
+   * first thing the user can see. That is the whole of "I moved fast and the
+   * playing sample is now above and I cannot see it": the page jump was
+   * landing the selection under the header every time.
+   *
+   * Measured rather than assumed, because the band's height depends on the
+   * window width (the filter chips wrap), on the interface scale, and on
+   * whether the user has turned the sticky toolbar off at all.
+   */
+  const stickyInset = useCallback(() => {
+    const el = scrollContainerRef?.current ?? internalScrollRef.current;
+    if (!el) return 0;
+    const marked = Array.from(el.querySelectorAll<HTMLElement>('[data-sticky-overlay]'));
+    // The column header is nested inside the toolbar band when that band is
+    // sticky, and they pin as one. Counting both would double the inset.
+    const outer = marked.filter((n) => !marked.some((o) => o !== n && o.contains(n)));
+    // Two pinned siblings would overlap rather than stack, so the deepest one
+    // is the inset, not the sum.
+    return outer.reduce((m, n) => Math.max(m, n.offsetHeight), 0);
+  }, [scrollContainerRef]);
 
-        if (rowRect.bottom > bottomGuard) {
-          const delta = rowRect.bottom - bottomGuard + 8;
-          scrollEl.scrollBy({ top: delta, behavior: 'auto' });
-        } else if (rowRect.top < topGuard) {
-          const delta = rowRect.top - topGuard - 8;
-          scrollEl.scrollBy({ top: delta, behavior: 'auto' });
-        }
-      });
-      return () => {
-        window.cancelAnimationFrame(raf);
-      };
+  /**
+   * Animated scrolling, and the pending destination.
+   *
+   * An instant jump is correct and reads as a glitch — the list is simply
+   * somewhere else and the eye has to find its place again. Easing the same
+   * distance over a fifth of a second reads as the list being pulled along.
+   *
+   * `to` is the other half of it. During the animation `scrollTop` is a
+   * position part-way there, so a second keypress would compare against it,
+   * decide the row was still off screen and start another animation on top —
+   * the stutter this is meant to remove. While a scroll is in flight, the
+   * destination is the truth about where the view is.
+   */
+  const scrollAnimRef = useRef<{ raf: number; to: number } | null>(null);
+  const pointerScrollTimerRef = useRef<number | null>(null);
+
+  const cancelScrollAnim = useCallback(() => {
+    if (pointerScrollTimerRef.current !== null) {
+      clearTimeout(pointerScrollTimerRef.current);
+      pointerScrollTimerRef.current = null;
     }
-  }, [selectedIndex, assets.length, virtualizer, scrollMargin, scrollContainerRef, editorHeight, editorAssetId]);
+    if (!scrollAnimRef.current) return;
+    cancelAnimationFrame(scrollAnimRef.current.raf);
+    scrollAnimRef.current = null;
+  }, []);
+
+  const animateScrollTo = useCallback(
+    (el: HTMLElement, rawTo: number) => {
+      // Past the end of the content the browser clamps `scrollTop` itself, so
+      // an unclamped target makes the easing run out against a wall: the last
+      // third of the animation moves nothing and the list looks like it stuck.
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      const to = Math.min(Math.max(0, rawTo), max);
+      // Already on its way to the same place. Restarting would re-ease from
+      // the current position, which is a visible hitch for no movement — and
+      // this effect re-runs for things that have nothing to do with the
+      // selection, such as the list being re-measured.
+      if (scrollAnimRef.current && Math.abs(scrollAnimRef.current.to - to) < 1) return;
+      const from = el.scrollTop;
+      const distance = to - from;
+      cancelScrollAnim();
+      if (Math.abs(distance) < 1) return;
+      const startedAt = performance.now();
+      const step = (now: number) => {
+        const t = Math.min(1, (now - startedAt) / SCROLL_ANIM_MS);
+        // Fast at first, settling at the end — the shape of something being
+        // pulled rather than driven.
+        const eased = 1 - (1 - t) ** 3;
+        el.scrollTop = from + distance * eased;
+        scrollAnimRef.current = t < 1 ? { raf: requestAnimationFrame(step), to } : null;
+      };
+      scrollAnimRef.current = { raf: requestAnimationFrame(step), to };
+    },
+    [cancelScrollAnim],
+  );
+
+  // The user's own scrolling always wins. Without this, a wheel flick during
+  // a page jump fights the animation for the same scrollTop.
+  useEffect(() => {
+    const el = scrollContainerRef?.current ?? internalScrollRef.current;
+    if (!el) return;
+    const stop = () => cancelScrollAnim();
+    el.addEventListener('wheel', stop, { passive: true });
+    el.addEventListener('pointerdown', stop, { passive: true });
+    return () => {
+      el.removeEventListener('wheel', stop);
+      el.removeEventListener('pointerdown', stop);
+      cancelScrollAnim();
+    };
+  }, [cancelScrollAnim, scrollContainerRef]);
+
+  /**
+   * Keep the selected row on screen — one page at a time, not one row at a
+   * time (keyboard / external selection only).
+   *
+   * Three things have been wrong here in turn, and the third is why this
+   * looks the way it does now.
+   *
+   * It used to nudge the row just far enough to clear a guard band, so
+   * arrowing down walked the selection to the bottom edge and pinned it
+   * there with everything it was moving towards off screen. Then it ran
+   * inside a `requestAnimationFrame` whose cleanup cancelled it on every
+   * change — holding an arrow key changes the selection faster than once per
+   * frame, so each pending frame was cancelled by the next keypress and the
+   * scroll never ran at all while the key was held.
+   *
+   * Centring every row fixed both and is still wrong at speed: it depends on
+   * reading `getBoundingClientRect()` for a row the virtualizer may not have
+   * mounted yet, and it moves the list on every single press, so a fast run
+   * is a continuously sliding list that the eye cannot track. It lands the
+   * row in the middle but asks you to read a moving target.
+   *
+   * Now the list holds still while the selection travels down it, and when
+   * the selection reaches the bottom the view pages so that row becomes the
+   * first *visible* one. "Visible" is the word that was missing: the toolbar
+   * band is pinned over the top of this same scroll container, so a row
+   * scrolled to `scrollTop = rowTop` lands behind it, four rows above
+   * anything the user can see. Moving fast therefore ended with the playing
+   * sample off the top of the screen. `stickyInset()` is what makes the
+   * arithmetic agree with the picture. The geometry is pure arithmetic — rows are a fixed height, so
+   * the row's offset is known without touching the DOM. Nothing here depends
+   * on the row being mounted, on a rect being up to date, or on how fast the
+   * keys repeat, and running it twice for the same selection changes
+   * nothing. That is what makes it survive a held arrow key.
+   */
+  useLayoutEffect(() => {
+    if (selectedIndex === null || selectedIndex < 0 || selectedIndex >= assets.length) return;
+    const scrollEl = scrollContainerRef?.current ?? internalScrollRef.current;
+    if (!scrollEl) return;
+
+    const viewHeight = scrollEl.clientHeight;
+    if (viewHeight <= 0) return;
+
+    const rowHeight = compactList ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
+    const rowTop = scrollMargin + selectedIndex * rowHeight;
+    const rowBottom = rowTop + rowHeight;
+    // Where the view is *going*, if it is already on its way somewhere.
+    const scrollPos = scrollAnimRef.current?.to ?? scrollEl.scrollTop;
+    // What the user can actually see: the container minus whatever is pinned
+    // over the top of it.
+    const inset = stickyInset();
+    const viewTop = scrollPos + inset;
+    const viewBottom = scrollPos + viewHeight;
+
+    // A row the user just pointed at is under their cursor by definition, so
+    // it only gets scrolled if it is genuinely off screen — never for being
+    // close to an edge, which would pull it out from under them. There is no
+    // dead window where nothing scrolls: a row that is fully outside the
+    // view always moves, however recent the click.
+    const fromPointer = performance.now() - lastPointerSelectRef.current < 400;
+    const selectionChanged = selectedIndex !== prevSelectedIndexRef.current;
+    prevSelectedIndexRef.current = selectedIndex;
+
+    // One row of air at each edge, so the selection never sits flush against
+    // the edge waiting to disappear and the next press has somewhere to go.
+    const guard = rowHeight;
+
+    /**
+     * A page jump is right for exactly one caller.
+     *
+     * Arrowing is a sustained movement in one direction: the list holding
+     * still and then paging is what lets the eye keep up. Nothing else here
+     * is that. Clicking the last visible row should bring the next few into
+     * reach, not throw the row you are pointing at to the top of the screen;
+     * and the editor opening — which takes 280px off the bottom of the view
+     * without the selection changing at all — should give back just enough
+     * room to see the row again. Both of those move the list by a row or
+     * two. Paging on them is what "the scroll tricks me" was.
+     */
+    const page = selectionChanged && !fromPointer;
+
+    const move = (to: number) => {
+      // A click is not finished until the double-click window has passed.
+      if (fromPointer && selectionChanged) {
+        pointerScrollTimerRef.current = window.setTimeout(() => {
+          pointerScrollTimerRef.current = null;
+          animateScrollTo(scrollEl, to);
+        }, POINTER_SCROLL_DELAY_MS);
+        return;
+      }
+      animateScrollTo(scrollEl, to);
+    };
+
+    if (rowBottom + guard > viewBottom) {
+      // Below the fold, or within a row of it.
+      move(page ? rowTop - inset : rowBottom + guard - viewHeight);
+    } else if (rowTop - guard < viewTop) {
+      // Above the fold, or within a row of it.
+      move(page ? rowBottom - viewHeight : rowTop - guard - inset);
+    }
+
+    return () => {
+      if (pointerScrollTimerRef.current === null) return;
+      clearTimeout(pointerScrollTimerRef.current);
+      pointerScrollTimerRef.current = null;
+    };
+  }, [
+    selectedIndex,
+    assets.length,
+    compactList,
+    scrollMargin,
+    scrollContainerRef,
+    editorHeight,
+    editorAssetId,
+    animateScrollTo,
+    stickyInset,
+  ]);
 
   // When page changes, reset selection to first item and scroll to top.
   // Skip on initial mount — the parent page owns the initial scroll
@@ -223,6 +448,26 @@ export function AssetGrid({
     virtualizer.scrollToIndex(0, { align: 'start' });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  /**
+   * Give the list its focus back when the editor closes.
+   *
+   * Up and down are handled on the list element, not on the window, because
+   * the grid is what owns the selection. That means they need focus — and
+   * opening the editor moves focus into it, so closing the editor left focus
+   * on nothing at all (the focused node had just been removed) and the arrow
+   * keys did nothing until the user clicked a row. Closing a panel should put
+   * the keyboard back where it was.
+   */
+  const editorWasOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = editorWasOpenRef.current;
+    editorWasOpenRef.current = editorAssetId !== null;
+    if (!wasOpen || editorAssetId !== null) return;
+    // `preventScroll` because focusing a tall scrolled container otherwise
+    // jumps it to wherever the browser thinks the focus ring belongs.
+    listViewportRef.current?.focus({ preventScroll: true });
+  }, [editorAssetId]);
 
   // Sync selectedIndex when currentAsset changes from outside (e.g. row click)
   useEffect(() => {

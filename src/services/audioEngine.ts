@@ -1,213 +1,81 @@
 /**
- * audioEngine.ts — Zero-latency audio playback engine
+ * audioEngine.ts — sample playback.
  *
- * Lives entirely outside React. Uses Web Audio API with pre-decoded
- * AudioBuffers so playback is instant — no buffering, no render cycle,
- * no IPC round-trip on the hot path.
+ * Lives entirely outside React. Decoded AudioBuffers are started directly, so
+ * an audition costs no render cycle and no IPC round-trip: the UI follows the
+ * audio rather than the other way around.
  *
- * Strategy:
- *  1. Decode audio files into AudioBuffers ahead of time (background)
- *  2. On play: grab the cached buffer and start a BufferSourceNode immediately
- *  3. React state updates happen AFTER audio starts — UI follows audio, not the other way around
+ * This file is only the playing. The rest of the engine is beside it, split
+ * out because each piece failed on its own and each is easier to reason about
+ * alone:
+ *
+ *  - `audio/contextKeeper.ts`  the output context and everything that keeps
+ *                              it alive: interruption, recovery, the clock
+ *                              check that catches a context lying about being
+ *                              alive. Most of the hard-won code is here.
+ *  - `audio/bufferCache.ts`    decoding and the buffer cache, with their own
+ *                              offline context, deliberately independent of
+ *                              the output.
+ *  - `audio/webkit.ts`         the WKWebView-specific tests and guards.
+ *  - `audio/diagnostics.ts`    the always-on event ring behind Settings →
+ *                              Audio diagnostics → Copy log.
+ *  - `audio/constants.ts`      the tuning numbers, each with the failure that
+ *                              chose it.
  */
 
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
+import {
+  INPUT_ATTRIBUTION_MS,
+  LOG_DUMP_THROTTLE_MS,
+  NO_SOUND_MS,
+  SAMPLE_GAIN_BOOST,
+  SLOW_START_MS,
+} from './audio/constants';
+import { lastInput } from './audio/inputClock';
+import { alog, formatLog } from './audio/diagnostics';
+import { clearOutputPrefs, isRunning, startOffsetFor, userActivationActive } from './audio/webkit';
+import { BufferCache } from './audio/bufferCache';
+import { ContextKeeper } from './audio/contextKeeper';
 
-// How many tracks to pre-decode around the current selection
-const PREFETCH_RADIUS = 3;
-// Max decoded buffers to keep in memory (~5–10 MB each for a typical sample)
-const CACHE_MAX = 20;
-// Extra output gain for sample preview playback so perceived loudness is higher.
-const SAMPLE_GAIN_BOOST = 2;
-// How long to watch the context clock before calling it stalled. Long enough to
-// clear a render quantum at any sample rate, short enough to stay invisible.
-const CLOCK_PROBE_MS = 120;
-// Starting a source this close to the end of the buffer is silence in practice.
-const END_OF_BUFFER_EPSILON = 0.01;
-// How hard to try resuming before declaring a context wedged. WebKit un-
-// interrupts asynchronously after the window comes back, so the first resume
-// can resolve into a state that is still not 'running'.
-const RESUME_ATTEMPTS = 5;
-const RESUME_RETRY_MS = 60;
-// How stale the last good clock sample may be before a synchronous reader
-// treats the context as stalled. Comfortably longer than a render quantum at
-// any sample rate, short enough that a click never trusts a dead context.
-const CLOCK_STALL_MS = 250;
-// How long after starting a source to confirm the clock actually moved.
-const START_VERIFY_MS = 80;
-
-// ─── Diagnostics ───────────────────────────────────────────────────────────
-// Verbose audio-path tracing, gated so it never spams release builds. Enable in
-// the console with `localStorage.setItem('stack:audioDebug','1')` then reload.
-// Used to diagnose the "scrubber moves but no sound" report on macOS Tahoe:
-// the traces reveal whether the AudioContext is created with a user gesture and
-// whether it reaches the 'running' state.
-function audioDebugEnabled(): boolean {
-  try {
-    return localStorage.getItem('stack:audioDebug') === '1';
-  } catch {
-    return false;
-  }
-}
-
-function alog(event: string, data?: Record<string, unknown>): void {
-  if (!audioDebugEnabled()) return;
-  // eslint-disable-next-line no-console
-  console.info(`[audio] ${event}`, data ?? '');
-}
-
-/** Whether the browser reports an active user gesture right now (WebKit autoplay gate). */
-function userActivationActive(): boolean | null {
-  const ua = (navigator as Navigator & { userActivation?: { isActive: boolean } })
-    .userActivation;
-  return ua ? ua.isActive : null;
-}
-
-// ─── Output preferences ──────────────────────────────────────────────────────
-const SAMPLE_RATE_KEY = 'stack:audioSampleRate';
-const LATENCY_KEY = 'stack:audioLatencyHint';
-const SINK_ID_KEY = 'stack:audioSinkId';
-
-function readNumberPref(key: string): number | null {
-  try {
-    const v = localStorage.getItem(key);
-    if (!v) return null;
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-function readStringPref(key: string): string | null {
-  try {
-    return localStorage.getItem(key) || null;
-  } catch {
-    return null;
-  }
-}
-
-function writePref(key: string, value: string | number | null): void {
-  try {
-    if (value === null || value === '') localStorage.removeItem(key);
-    else localStorage.setItem(key, String(value));
-  } catch {
-    /* ignore */
-  }
-}
-
-export type LatencyChoice = 'interactive' | 'balanced' | 'playback';
-
-type SinkCapableContext = AudioContext & { setSinkId?: (id: string) => Promise<void> };
-
-/**
- * True only when the context will actually produce sound. WebKit adds an
- * 'interrupted' state that the DOM `AudioContextState` union doesn't list,
- * so compare as a plain string rather than against the union.
- */
-function isRunning(ctx: AudioContext): boolean {
-  return (ctx.state as string) === 'running';
-}
-
-/**
- * Where in the buffer to actually start.
- *
- * An offset at or past the end starts a source that produces no sound and ends
- * immediately. That used to be reachable by ordinary use: the play button maps
- * to stop/resume, each stop recorded the playhead, and on a short one-shot a
- * few quick presses walked the resume point to the end of the file — after
- * which every press was silent until another sample was selected (issue #12).
- * Treat it as "play it again" instead, which is what the button means.
- */
-function startOffsetFor(offsetSec: number, duration: number): number {
-  if (!Number.isFinite(offsetSec) || offsetSec <= 0) return 0;
-  if (offsetSec >= duration - END_OF_BUFFER_EPSILON) return 0;
-  return Math.min(offsetSec, duration);
-}
-type SinkCapableMediaEl = HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
-
-/** Native AudioContext output routing (Chromium). WebKit lacks this. */
-function supportsContextSink(): boolean {
-  try {
-    return (
-      typeof AudioContext !== 'undefined' &&
-      typeof (AudioContext.prototype as SinkCapableContext).setSinkId === 'function'
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Media-element output routing. WebKit/WKWebView supports this even without context sink. */
-function supportsMediaElementSink(): boolean {
-  try {
-    return (
-      typeof HTMLMediaElement !== 'undefined' &&
-      typeof (HTMLMediaElement.prototype as SinkCapableMediaEl).setSinkId === 'function'
-    );
-  } catch {
-    return false;
-  }
-}
-
-type CacheEntry = {
-  buffer: AudioBuffer;
-  lastUsed: number;
-};
+// An output preference set by an older build would still be in force with
+// nothing in the interface admitting it exists.
+clearOutputPrefs();
 
 class AudioEngine {
-  private ctx: AudioContext | null = null;
-  private globalListenersBound = false;
-  // Sample rate the cached buffers were decoded at. An AudioBuffer is only
-  // reusable in another context at the same rate, so this is what decides
-  // whether a rebuild has to throw the cache away.
-  private cacheSampleRate: number | null = null;
-  // Set while the window is in the background. The context can be interrupted
-  // out of sight — switching macOS Spaces is enough — so the next time the
-  // user touches the app we re-check the clock rather than assume.
-  private backgroundSinceLastCheck = false;
-  // True once a context has existed. Distinguishes "torn down and owed a
-  // replacement" from "the user has not played anything yet", so we never
-  // build a context nobody asked for.
-  private hadContext = false;
-  // In-flight heal kicked off from a synchronous path.
-  private healing: Promise<unknown> | null = null;
-  // In-flight recovery, so overlapping app-switch events coalesce.
-  private recovering: Promise<void> | null = null;
-  // In-flight context construction, so concurrent callers share one context.
-  private ctxInit: Promise<void> | null = null;
-  // Last observed audio-clock value and the wall time it was observed at.
-  private clockMark = { ctx: 0, wall: 0 };
   // Bumped by every call that changes what should be audible. Anything that
   // awaits must re-check it before starting a source, or it will start a
   // sample the user has already moved on from.
   private intent = 0;
+  // When sound was last asked for, and for what. Everything audible is timed
+  // against this, because "it feels delayed" is not something anyone can act
+  // on and a number is.
+  private requestedAt = 0;
+  private requestedPath: string | null = null;
+  /** Has anything made a sound for `requestedPath` yet? */
+  private answered = false;
+  private silenceTimer: number | null = null;
+  private lastDumpAt = 0;
   // Told when a dead context has been replaced, so the player can decide for
   // itself whether anything should now be playing.
   onContextRestored: (() => void) | null = null;
+  /** A source started but was not heard — the player should route it elsewhere. */
+  onStartFailed: ((path: string) => void) | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
-  private gainNode: GainNode | null = null;
-  private cache = new Map<string, CacheEntry>();
-  // Single in-flight decode promise per path — prevents duplicate fetches
-  private decoding = new Map<string, Promise<AudioBuffer | null>>();
+  // Decoded samples. Owns its own decoder, deliberately independent of the
+  // output context — see audio/bufferCache.ts.
+  private buffers = new BufferCache();
   private volume = 0.8;
-
-  // User audio-output preferences. Persisted in localStorage (device-specific —
-  // a deviceId from one Mac is meaningless on another, so we don't sync them).
-  // null means "use the system default".
-  private preferredSampleRate: number | null = readNumberPref(SAMPLE_RATE_KEY);
-  // How hard to ask the platform for a small output buffer. 'interactive' is
-  // the Web Audio default and the smallest it will offer; the others trade
-  // latency for safety against dropouts. Device-specific, so it lives in
-  // localStorage with the rest of the output preferences.
-  private preferredLatency: LatencyChoice =
-    (readStringPref(LATENCY_KEY) as LatencyChoice | null) ?? 'interactive';
-  private preferredSinkId: string | null = readStringPref(SINK_ID_KEY);
-
-  // Media-element output routing (WebKit path): gain → MediaStream → <audio>.setSinkId.
-  // Only engaged when a non-default device is selected and AudioContext.setSinkId is absent.
-  private streamDest: MediaStreamAudioDestinationNode | null = null;
-  private sinkAudioEl: SinkCapableMediaEl | null = null;
+  // The output context and its life support — see audio/contextKeeper.ts.
+  // Everything it needs from here is passed in, so it can be reasoned about
+  // (and repaired) without knowing anything about playback.
+  private keeper = new ContextKeeper(this.buffers, {
+    stopSource: () => this.stopCurrentSource(),
+    currentPath: () => this.currentPath,
+    isCurrentTicket: (ticket) => ticket === this.intent,
+    onRestored: () => this.onContextRestored?.(),
+    onStartFailed: (path) => this.onStartFailed?.(path),
+    gainValue: () => this.volume * SAMPLE_GAIN_BOOST,
+  });
 
   // Callbacks wired up by usePlayer
   onTimeUpdate: ((time: number) => void) | null = null;
@@ -218,602 +86,26 @@ class AudioEngine {
   private startedAt = 0;   // ctx.currentTime when playback started
   private startOffset = 0; // where in the buffer we started from
 
-  // ─── AudioContext ────────────────────────────────────────────────────────
-
-  /**
-   * Returns the AudioContext, creating it if needed.
-   * Returns a Promise so callers can await resume() before starting a source.
-   */
-  async getCtxAsync(allowRebuild = true): Promise<AudioContext> {
-    if (!this.ctx || this.ctx.state === 'closed') {
-      // Coalesced. Recovery, a healing click and an ordinary play can all want
-      // a context at the same moment; unguarded, each would construct its own
-      // and the last writer would orphan the others — live contexts holding
-      // the output device open with nothing able to close them.
-      if (!this.ctxInit) {
-        this.ctxInit = this.createContext().finally(() => {
-          this.ctxInit = null;
-        });
-      }
-      await this.ctxInit;
-    }
-    const ctx = this.ctx!;
-    if (!isRunning(ctx)) {
-      const before = ctx.state as string;
-      try {
-        await ctx.resume();
-      } catch {
-        alog('ctx:resume-threw', { from: before });
-      }
-      alog('ctx:resume', { from: before, stateAfterResume: ctx.state });
-      // resume() resolving proves nothing. WebKit resolves it on an
-      // 'interrupted' context and leaves the state exactly where it was, and
-      // the source started next then plays into silence while every check
-      // along the way reports success. Only the state afterwards counts.
-      if (!isRunning(ctx) && allowRebuild) {
-        alog('ctx:resume-ineffective', { ctxState: ctx.state });
-        await this.rebuildContext(false);
-        return this.getCtxAsync(false);
-      }
-    }
-    this.markClock(this.ctx!);
-    return this.ctx!;
-  }
-
-  private async createContext(): Promise<void> {
-    const Ctor =
-      window.AudioContext ||
-      (window as Window & { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
-    // sampleRate is immutable per context — honoring the user's choice means
-    // passing it at construction. Invalid rates throw, so fall back to default.
-    try {
-      const options: AudioContextOptions = { latencyHint: this.preferredLatency };
-      if (this.preferredSampleRate) options.sampleRate = this.preferredSampleRate;
-      this.ctx = new Ctor(options);
-    } catch {
-      this.ctx = new Ctor();
-    }
-    this.gainNode = this.ctx.createGain();
-    this.gainNode.gain.value = this.volume * SAMPLE_GAIN_BOOST;
-    // The key diagnostic: was the context born inside a user gesture? On WebKit
-    // a context created without one can report 'running' yet stay muted.
-    alog('ctx:construct', {
-      stateAfterCtor: this.ctx.state,
-      sampleRate: this.ctx.sampleRate,
-      requestedSampleRate: this.preferredSampleRate,
-      userActivationActive: userActivationActive(),
-    });
-    // Buffers decoded for the previous context are still good as long as the
-    // rate matches, and keeping them matters: a cache miss drops the next
-    // click onto the HTML-audio path instead of the instant one.
-    if (this.cacheSampleRate !== null && this.cacheSampleRate !== this.ctx.sampleRate) {
-      this.cache.clear();
-      this.decoding.clear();
-    }
-    this.cacheSampleRate = this.ctx.sampleRate;
-    this.hadContext = true;
-    await this.wireOutput();
-    this.watchContextState(this.ctx);
-    this.bindGlobalListeners();
-  }
-
-  /**
-   * Per-context. Runs for EVERY context, including replacements built by
-   * `rebuildContext` — a single "already bound" flag used to leave every
-   * context after the first one unwatched.
-   */
-  private watchContextState(ctx: AudioContext) {
-    ctx.addEventListener('statechange', () => {
-      alog('ctx:statechange', { ctxState: ctx.state });
-      if (this.ctx === ctx && !isRunning(ctx) && ctx.state !== 'closed') {
-        ctx.resume().catch(() => {
-          alog('ctx:auto-resume-failed', { ctxState: ctx.state });
-        });
-      }
-    });
-  }
-
-  /**
-   * Bound once per page: the app returning to the foreground, and the audio
-   * devices changing underneath us.
-   */
-  private bindGlobalListeners() {
-    if (this.globalListenersBound) return;
-    this.globalListenersBound = true;
-
-    // Coming back to the app is the moment before the user hits play. Note
-    // that `visibilitychange` does NOT fire when another application merely
-    // covers the window — the document stays visible — so `focus` is the
-    // event that actually carries an app switch, which is the case that
-    // matters here (a DAW in front, then back to Stack).
-    window.addEventListener('blur', () => {
-      this.backgroundSinceLastCheck = true;
-    });
-    window.addEventListener('focus', () => void this.recoverOutput());
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.backgroundSinceLastCheck = true;
-      else void this.recoverOutput();
-    });
-
-    // Last line of defence. Switching macOS Spaces interrupts the context, and
-    // the window does not reliably report that with a `focus` event — the user
-    // comes back to a dead engine and clicks play. A pointer landing on the app
-    // after any spell in the background re-checks before that click is handled;
-    // the flag keeps the clock probe off the ordinary click path.
-    window.addEventListener(
-      'pointerdown',
-      () => {
-        // A pointer press is a user gesture, and a gesture is the one moment
-        // WebKit reliably lets a context come back. Asking here — in the
-        // capture phase, before any click handler runs — means the resume is
-        // already in flight by the time the play lands, instead of the play
-        // having to await it. This is the difference between an instant
-        // audition and a short but noticeable one.
-        const ctx = this.ctx;
-        if (ctx && ctx.state !== 'closed' && !isRunning(ctx)) {
-          ctx.resume().catch(() => {});
-        }
-        if (this.backgroundSinceLastCheck) void this.recoverOutput();
-      },
-      true
-    );
-
-    // A DAW opening or releasing the output device surfaces here. The context
-    // is bound to the device it was built on, so this is the other moment
-    // worth re-checking.
-    try {
-      navigator.mediaDevices?.addEventListener?.('devicechange', () => {
-        alog('devices:change');
-        void this.recoverOutput();
-      });
-    } catch {
-      /* no mediaDevices in this webview */
-    }
-  }
-
-  /**
-   * True while the context's clock is actually advancing.
-   *
-   * A context can sit in 'running' and still be dead: once another application
-   * takes the output device, the clock stops, `start()` reports success and
-   * nothing is heard. The state cannot tell those apart — the clock can.
-   */
-  private async isClockAdvancing(ctx: AudioContext): Promise<boolean> {
-    const before = ctx.currentTime;
-    await new Promise((resolve) => setTimeout(resolve, CLOCK_PROBE_MS));
-    return ctx.currentTime > before;
-  }
-
-  /**
-   * Resume a suspended context, and replace one that is wedged.
-   *
-   * This is the recovery path for the dropout after switching to a DAW and
-   * back: the old code only ever called `resume()`, which cannot fix a context
-   * whose device has gone away. Without the rebuild the app stayed silent
-   * until it was restarted.
-   */
-  private recoverOutput(): Promise<void> {
-    // `focus`, `visibilitychange` and `pointerdown` can all land on the same
-    // app switch. Two recoveries in flight would race over the rebuild — one
-    // closing the context the other had just stood up.
-    if (!this.recovering) {
-      this.recovering = this.runRecovery().finally(() => {
-        this.recovering = null;
-      });
-    }
-    return this.recovering;
-  }
-
-  private async runRecovery(): Promise<void> {
-    this.backgroundSinceLastCheck = false;
-    const ctx = this.ctx;
-    // Nothing to recover, but also nothing to play through: a previous
-    // recovery may have torn the context down. Build the replacement now
-    // rather than leaving the engine dead until something awaits it.
-    if (!ctx || ctx.state === 'closed') {
-      if (this.hadContext) await this.getCtxAsync().catch(() => {});
-      return;
-    }
-
-    // Retry rather than resume once. WebKit interrupts and un-interrupts the
-    // context around backgrounding, and a resume issued while that is in
-    // flight resolves without changing the state — the reports on
-    // webkit.org/b/240646 converge on "keep asking until it reads running".
-    // A handful of attempts costs a few hundred ms on an app switch and saves
-    // throwing away a context that was about to come back on its own.
-    for (let attempt = 0; attempt < RESUME_ATTEMPTS && !isRunning(ctx); attempt += 1) {
-      try {
-        await ctx.resume();
-      } catch {
-        /* state is checked below */
-      }
-      if (this.ctx !== ctx) return;
-      if (isRunning(ctx)) break;
-      await new Promise((resolve) => setTimeout(resolve, RESUME_RETRY_MS));
-    }
-    if (this.ctx !== ctx) return; // replaced while we were awaiting
-
-    if (isRunning(ctx) && (await this.isClockAdvancing(ctx))) return;
-    if (this.ctx !== ctx) return;
-
-    // The rebuild is no longer deferred. It was, to keep a click that landed
-    // mid-recovery off the slow path — but `getCtxSync` now refuses a stalled
-    // context outright, so that click was never going to reach the engine
-    // anyway. All the deferral bought was most of a second of silence before
-    // anything was heard at all.
-    alog('ctx:wedged-rebuilding', { ctxState: ctx.state });
-    await this.rebuildContext(false);
-    // Stand the replacement up straight away. Leaving `ctx` null was the whole
-    // bug behind "the sound disappears after a DAW, or after switching Spaces,
-    // and never comes back": the only caller that builds a context is
-    // `getCtxAsync`, and the hot play path goes through the synchronous
-    // `playBuffer`, which never awaits anything. The engine stayed dead for the
-    // rest of the session.
-    await this.getCtxAsync().catch(() => {});
-
-    // The engine deliberately does NOT restart anything here.
-    //
-    // It used to: it remembered whatever `currentPath` held when the
-    // interruption hit and replayed it once the context was back. Nothing
-    // checked that the user still wanted that sample, and `currentPath`
-    // survives the entire time away because a stalled context never fires
-    // `onended` — so coming back from ten minutes in a DAW and clicking a new
-    // sample played the OLD one over it. That is the "wrong sample" report.
-    //
-    // Whether anything should be playing is the player's business, not the
-    // engine's: only the store knows what is selected and whether the user
-    // actually asked for sound.
-    this.onContextRestored?.();
-  }
-
-  /**
-   * Fire-and-forget context repair, callable from a synchronous path.
-   *
-   * Coalesced: a run of failing clicks must not stack up rebuilds on top of
-   * each other, which would close the context the previous one just opened.
-   */
-  private heal(): void {
-    if (this.healing) return;
-    this.healing = this.getCtxAsync()
-      .catch(() => null)
-      .finally(() => {
-        this.healing = null;
-      });
-  }
-
-  /**
-   * Record that the clock was seen at this value, now.
-   *
-   * Two timestamps are all a synchronous stall check needs: if wall time has
-   * moved on and `ctx.currentTime` has not, the context is dead whatever it
-   * claims its state is.
-   */
-  private markClock(ctx: AudioContext) {
-    this.clockMark = { ctx: ctx.currentTime, wall: performance.now() };
-  }
-
-  /**
-   * Confirm a source that has just started is actually being heard.
-   *
-   * `start()` succeeding proves nothing on WebKit — the documented failure is
-   * a context that reports `running` while its clock is stopped. The
-   * synchronous check in `getCtxSync` catches that from the *second* click
-   * onward, because it needs a previous good sample to compare against; this
-   * is what catches the first one. If the clock has not moved shortly after
-   * starting, the context is dead: repair it and tell the player, which can
-   * then route the sample somewhere audible.
-   */
-  private verifyStarted(ctx: AudioContext, ticket: number) {
-    const before = ctx.currentTime;
-    window.setTimeout(() => {
-      if (this.ctx !== ctx || ticket !== this.intent) return;
-      if (ctx.currentTime > before) {
-        this.markClock(ctx);
-        return;
-      }
-      alog('ctx:started-but-silent', { ctxState: ctx.state });
-      this.stopCurrentSource();
-      void this.recoverOutput();
-    }, START_VERIFY_MS);
-  }
-
-  /** Synchronous accessor — only safe after getCtxAsync() has been awaited once. */
-  private getCtxSync(): AudioContext | null {
-    // Anything other than 'running' means sources would start silently. In
-    // particular WebKit has an 'interrupted' state (system audio interruption,
-    // or the app sitting in the background for a long stretch) that is absent
-    // from the DOM type union: treating it as usable produced a source that
-    // reported success and played nothing, and because the engine then looked
-    // "active", usePlayer trusted it and never fell back to HTML audio.
-    if (!this.ctx || !isRunning(this.ctx)) {
-      return null;
-    }
-
-    // `running` is still not proof — that is the whole premise of this engine,
-    // and checking the state alone here quietly undid it. Once another app has
-    // taken the device the clock stops while the state stays `running`, so
-    // `playBuffer` started a source, returned TRUE, and `usePlayer` believed
-    // the engine had it: no fallback, no sound, and a UI that read "playing"
-    // over silence until recovery eventually replayed it most of a second
-    // later. That is the whole of the reported delay.
-    //
-    // The check is two numbers rather than the 120ms probe `recoverOutput`
-    // uses, because this sits on the click path and cannot await anything:
-    // if wall time has advanced past the last good sample and the audio clock
-    // has not moved with it, the context is stalled.
-    const now = performance.now();
-    const { ctx, wall } = this.clockMark;
-    if (wall > 0 && now - wall > CLOCK_STALL_MS && this.ctx.currentTime <= ctx + 1e-4) {
-      alog('ctx:clock-stalled', { ctxTime: this.ctx.currentTime, since: now - wall });
-      this.heal();
-      return null;
-    }
-    if (this.ctx.currentTime > ctx) this.markClock(this.ctx);
-    return this.ctx;
-  }
-
-  /**
-   * Connect the gain node to the chosen output. Three routes, in priority order:
-   *  1. No device chosen → straight to ctx.destination (default, lowest latency).
-   *  2. AudioContext.setSinkId available (Chromium) → route to destination + set sink.
-   *  3. Media-element sink (WebKit) → gain → MediaStream → <audio>.setSinkId.
-   * Safe to call repeatedly; it tears down any previous routing first.
-   */
-  private async wireOutput(): Promise<void> {
-    if (!this.ctx || !this.gainNode) return;
-
-    // Tear down whatever was connected before.
-    try { this.gainNode.disconnect(); } catch { /* nothing connected */ }
-    if (this.sinkAudioEl) {
-      this.sinkAudioEl.pause();
-      this.sinkAudioEl.srcObject = null;
-    }
-    this.streamDest = null;
-
-    // Route 1: system default.
-    if (!this.preferredSinkId) {
-      this.gainNode.connect(this.ctx.destination);
-      return;
-    }
-
-    // Route 2: native context sink (Chromium).
-    const sinkCtx = this.ctx as SinkCapableContext;
-    if (typeof sinkCtx.setSinkId === 'function') {
-      this.gainNode.connect(this.ctx.destination);
-      try {
-        await sinkCtx.setSinkId(this.preferredSinkId);
-        alog('output:ctxSink', { sinkId: this.preferredSinkId });
-      } catch (err) {
-        alog('output:ctxSink-failed', { error: String(err) });
-      }
-      return;
-    }
-
-    // Route 3: media-element sink (WebKit) — gain → MediaStream → <audio>.setSinkId.
-    if (supportsMediaElementSink()) {
-      this.streamDest = this.ctx.createMediaStreamDestination();
-      this.gainNode.connect(this.streamDest);
-      if (!this.sinkAudioEl) {
-        this.sinkAudioEl = new Audio() as SinkCapableMediaEl;
-        this.sinkAudioEl.autoplay = true;
-      }
-      this.sinkAudioEl.srcObject = this.streamDest.stream;
-      try {
-        await this.sinkAudioEl.setSinkId!(this.preferredSinkId);
-        await this.sinkAudioEl.play().catch(() => {});
-        alog('output:mediaSink', { sinkId: this.preferredSinkId });
-      } catch (err) {
-        // Fall back to default so the user still hears something.
-        alog('output:mediaSink-failed', { error: String(err) });
-        try { this.gainNode.disconnect(); } catch { /* ignore */ }
-        this.gainNode.connect(this.ctx.destination);
-      }
-      return;
-    }
-
-    // No routing capability — default.
-    this.gainNode.connect(this.ctx.destination);
-  }
-
-  /**
-   * Tear down the current context and decoded buffers so the next play rebuilds
-   * with current preferences. Buffers are decoded at the old context's sample
-   * rate, so they must be dropped when the rate changes.
-   */
-  private async rebuildContext(dropBuffers = true): Promise<void> {
-    this.stopCurrentSource();
-    if (dropBuffers) {
-      this.cache.clear();
-      this.decoding.clear();
-      this.cacheSampleRate = null;
-    } else {
-      // In-flight decodes belong to the context that is going away; the
-      // finished buffers do not, and `getCtxAsync` drops them if the
-      // replacement comes up at a different rate.
-      this.decoding.clear();
-    }
-    if (this.sinkAudioEl) {
-      this.sinkAudioEl.pause();
-      this.sinkAudioEl.srcObject = null;
-    }
-    this.streamDest = null;
-    const old = this.ctx;
-    this.ctx = null;
-    this.gainNode = null;
-    if (old && old.state !== 'closed') {
-      try { await old.close(); } catch { /* already closing */ }
-    }
-  }
-
-  // ─── Output preferences (user-facing) ─────────────────────────────────────
-
-  /** Whether output-device selection is usable in this runtime (native or media-element route). */
-  supportsOutputSelection(): boolean {
-    return (
-      (supportsContextSink() || supportsMediaElementSink()) &&
-      !!navigator.mediaDevices?.enumerateDevices
-    );
-  }
-
-  /** List available audio output devices. Labels may be blank without a media-permission grant. */
-  async listOutputDevices(): Promise<Array<{ deviceId: string; label: string }>> {
-    if (!navigator.mediaDevices?.enumerateDevices) return [];
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      return devices
-        .filter((d) => d.kind === 'audiooutput')
-        .map((d) => ({ deviceId: d.deviceId, label: d.label }));
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * WebKit hides output device IDs/labels until the page has been granted a
-   * media permission. Briefly opening (and immediately closing) an audio capture
-   * stream unlocks enumeration. Returns the re-enumerated device list.
-   */
-  async unlockOutputDevices(): Promise<Array<{ deviceId: string; label: string }>> {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-    } catch {
-      // Permission denied — fall through and return whatever we can enumerate.
-    }
-    return this.listOutputDevices();
-  }
-
-  getPreferredSinkId(): string | null {
-    return this.preferredSinkId;
-  }
-
-  /** Set the output device and re-route live (no context rebuild needed). */
-  async setOutputDevice(sinkId: string | null): Promise<void> {
-    this.preferredSinkId = sinkId;
-    writePref(SINK_ID_KEY, sinkId);
-    if (this.ctx && this.gainNode) await this.wireOutput();
-  }
-
-  getPreferredLatency(): LatencyChoice {
-    return this.preferredLatency;
-  }
-
-  /**
-   * Set how aggressively to ask for a small output buffer. Rebuilds, because
-   * `latencyHint` is fixed for the life of a context.
-   *
-   * This is a request, not a guarantee: the hardware buffer is shared, so a
-   * DAW holding the device at a large size caps how small this can get. The
-   * Audio diagnostics readout shows what was actually granted.
-   */
-  async setPreferredLatency(choice: LatencyChoice): Promise<void> {
-    if (choice === this.preferredLatency) return;
-    this.preferredLatency = choice;
-    writePref(LATENCY_KEY, choice);
-    await this.rebuildContext(false);
-    await this.getCtxAsync().catch(() => {});
-  }
-
-  getPreferredSampleRate(): number | null {
-    return this.preferredSampleRate;
-  }
-
-  /** Set the output sample rate. Rebuilds the context (rate is immutable per context). */
-  async setPreferredSampleRate(rate: number | null): Promise<void> {
-    if (rate === this.preferredSampleRate) return;
-    this.preferredSampleRate = rate;
-    writePref(SAMPLE_RATE_KEY, rate);
-    await this.rebuildContext();
-  }
-
   // ─── Buffer cache ────────────────────────────────────────────────────────
+  // Thin pass-throughs. The decoding itself lives in audio/bufferCache.ts.
 
-  private evictIfNeeded() {
-    if (this.cache.size < CACHE_MAX) return;
-    // Remove least-recently-used entry
-    let oldest = Infinity;
-    let oldestKey = '';
-    for (const [k, v] of this.cache) {
-      if (v.lastUsed < oldest) {
-        oldest = v.lastUsed;
-        oldestKey = k;
-      }
-    }
-    if (oldestKey) this.cache.delete(oldestKey);
-  }
-
-  /**
-   * Fetch + decode a file into an AudioBuffer.
-   * Always registers in `decoding` so concurrent callers share the same promise.
-   * Returns null on any failure.
-   */
-  private decodeFile(path: string): Promise<AudioBuffer | null> {
-    // Return existing in-flight promise if one exists
-    const existing = this.decoding.get(path);
-    if (existing) return existing;
-
-    const p = (async (): Promise<AudioBuffer | null> => {
-      const url = convertFileSrc(path);
-      try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          alog('decode:fetch-failed', { path, status: res.status });
-          return null;
-        }
-        const arrayBuffer = await res.arrayBuffer();
-        // Ensure context is running before decoding
-        const ctx = await this.getCtxAsync();
-        const buffer = await ctx.decodeAudioData(arrayBuffer);
-        this.evictIfNeeded();
-        this.cache.set(path, { buffer, lastUsed: Date.now() });
-        alog('decode:ok', { path, duration: buffer.duration });
-        return buffer;
-      } catch (err) {
-        // decodeAudioData throwing on Tahoe would pin us to the HTML fallback forever.
-        alog('decode:error', { path, error: String(err) });
-        return null;
-      } finally {
-        this.decoding.delete(path);
-      }
-    })();
-
-    this.decoding.set(path, p);
-    return p;
-  }
-
-  /**
-   * Synchronous cache lookup. Returns the buffer if already decoded, null otherwise.
-   */
   /** Is this sample already decoded and in memory? */
   hasBuffer(path: string): boolean {
-    return this.cache.has(path);
+    return this.buffers.has(path);
   }
 
   getBuffer(path: string): AudioBuffer | null {
-    const entry = this.cache.get(path);
-    if (entry) {
-      entry.lastUsed = Date.now();
-      return entry.buffer;
-    }
-    return null;
+    return this.buffers.get(path);
   }
 
-  /** Kick off background decode for a path (no-op if already cached or decoding) */
+  /** Kick off a background decode (no-op if already cached or decoding). */
   prefetch(path: string): void {
-    if (this.cache.has(path)) return;
-    if (this.decoding.has(path)) return;
-    this.decodeFile(path);
+    this.buffers.prefetch(path);
   }
 
-  /** Ensure a buffer is ready, decoding now if needed. Returns the buffer. */
-  async ensureBuffer(path: string): Promise<AudioBuffer | null> {
-    const cached = this.cache.get(path);
-    if (cached) {
-      cached.lastUsed = Date.now();
-      return cached.buffer;
-    }
-    return this.decodeFile(path);
+  /** Ensure a buffer is ready, decoding now if needed. */
+  ensureBuffer(path: string): Promise<AudioBuffer | null> {
+    return this.buffers.ensure(path);
   }
 
   // ─── Playback ────────────────────────────────────────────────────────────
@@ -860,7 +152,11 @@ class AudioEngine {
    * guaranteed to be running before the source starts.
    * Returns true if playback started, false if buffer not cached.
    */
-  async playBufferAsync(path: string, offsetSec = 0): Promise<boolean> {
+  async playBufferAsync(
+    path: string,
+    offsetSec = 0,
+    stillWanted?: () => boolean,
+  ): Promise<boolean> {
     const buffer = this.getBuffer(path);
     if (!buffer) {
       alog('playAsync:buffer-miss', { path });
@@ -872,22 +168,43 @@ class AudioEngine {
     // when it has to be rebuilt, which is ample time for the user to pick a
     // different sample — and starting this one then is how the wrong sample
     // gets heard.
+    // Only if nothing has claimed this one already — the usual route here is
+    // a sync play that bailed, and that is the instant the user actually
+    // clicked, so overwriting it would hide the very delay being measured.
+    if (this.requestedPath !== path) this.noteRequest(path);
     const ticket = ++this.intent;
-    const ctx = await this.getCtxAsync();
+    const ctx = await this.keeper.getCtxAsync();
     if (ticket !== this.intent) {
       alog('playAsync:superseded', { path });
+      return false;
+    }
+    // The ticket alone was not enough. It is bumped by a *successful* start,
+    // by `pause` and by `stop` — not by a click the engine refused, and not
+    // by one that went to the element instead. So after a Space switch, where
+    // every play parks on a resume, the user could click three more samples
+    // without the ticket moving once; when the context finally came back the
+    // oldest parked start was still the newest ticket and it played over the
+    // top of what was on screen. The store knows what is wanted; ask it.
+    if (stillWanted && !stillWanted()) {
+      alog('playAsync:no-longer-wanted', { path });
+      return false;
+    }
+    if (!isRunning(ctx)) {
+      // Nothing to start into. Say so rather than starting a source that
+      // cannot be heard, so the caller can route this somewhere audible.
+      alog('playAsync:ctx-not-running', { path, ctxState: ctx.state });
       return false;
     }
     this.stopCurrentSource();
     alog('playAsync:start', {
       path,
       ctxState: ctx.state,
-      gainValue: this.gainNode?.gain.value,
+      gainValue: this.keeper.gain?.gain.value,
     });
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.gainNode!);
+    source.connect(this.keeper.gain!);
 
     this.startedAt = ctx.currentTime;
     this.startOffset = startOffsetFor(offsetSec, buffer.duration);
@@ -896,14 +213,15 @@ class AudioEngine {
 
     source.start(0, this.startOffset);
     this.currentSource = source;
-    this.verifyStarted(ctx, ticket);
+    this.keeper.verifyStarted(ctx, ticket);
+    this.noteAudible(path, 'async');
 
     // Notify duration immediately
     this.onDuration?.(buffer.duration);
 
     // Start time ticker
     this.tickerRef = window.setInterval(() => {
-      const ctx = this.getCtxSync();
+      const ctx = this.keeper.getCtxSync();
       if (!ctx || !this.currentSource) return;
       const elapsed = ctx.currentTime - this.startedAt;
       const current = Math.min(buffer.duration, this.startOffset + elapsed);
@@ -928,12 +246,17 @@ class AudioEngine {
    * Returns false if context isn't ready or buffer isn't cached.
    */
   playBuffer(path: string, offsetSec = 0): boolean {
+    // Claimed first, before anything can bail. Every early return below used
+    // to leave the ticket untouched, which let a start parked on a resume
+    // from several clicks ago still look current when it finally woke up.
+    const ticket = ++this.intent;
+    this.noteRequest(path);
     const buffer = this.getBuffer(path);
     if (!buffer) {
       alog('playSync:buffer-miss', { path, userActivationActive: userActivationActive() });
       // The decode that follows runs outside this gesture; make sure it has a
       // live context to land in when it finishes.
-      this.heal();
+      this.keeper.heal();
       // Buffer not cached — sync fast path can't play. Critically, if a
       // DIFFERENT asset is currently playing through this engine, stop it
       // now. Otherwise the engine reports `isActive() === true` while the
@@ -946,21 +269,21 @@ class AudioEngine {
       return false;
     }
 
-    const ctx = this.getCtxSync();
+    const ctx = this.keeper.getCtxSync();
     if (!ctx) {
       // The sync path can't run when the context isn't already 'running'. This is
       // the suspected Tahoe failure point: the gesture click lands here, bails, and
       // the context only ever gets resumed later from a non-gesture async path.
       alog('playSync:ctx-not-ready', {
         path,
-        ctxState: this.ctx?.state ?? 'none',
+        ctxState: this.keeper.ctx?.state ?? 'none',
         userActivationActive: userActivationActive(),
       });
       // This click is lost to the HTML-audio fallback, but the next one need
       // not be. A click is also the context's best chance of coming back —
       // every account of this WebKit bug ends with "resume it from a gesture
       // handler" — so take it.
-      this.heal();
+      this.keeper.heal();
       // Same reasoning as above — keep the engine's state honest.
       if (this.currentSource && this.currentPath !== path) {
         this.stopCurrentSource();
@@ -968,12 +291,11 @@ class AudioEngine {
       return false;
     }
 
-    this.intent += 1;
     this.stopCurrentSource();
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.gainNode!);
+    source.connect(this.keeper.gain!);
 
     this.startedAt = ctx.currentTime;
     this.startOffset = startOffsetFor(offsetSec, buffer.duration);
@@ -982,17 +304,18 @@ class AudioEngine {
 
     source.start(0, this.startOffset);
     this.currentSource = source;
-    this.verifyStarted(ctx, this.intent);
+    this.keeper.verifyStarted(ctx, ticket);
+    this.noteAudible(path, 'sync');
     alog('playSync:start', {
       path,
       ctxState: ctx.state,
-      gainValue: this.gainNode?.gain.value,
+      gainValue: this.keeper.gain?.gain.value,
     });
 
     this.onDuration?.(buffer.duration);
 
     this.tickerRef = window.setInterval(() => {
-      const ctx = this.getCtxSync();
+      const ctx = this.keeper.getCtxSync();
       if (!ctx || !this.currentSource) return;
       const elapsed = ctx.currentTime - this.startedAt;
       const current = Math.min(buffer.duration, this.startOffset + elapsed);
@@ -1012,7 +335,7 @@ class AudioEngine {
 
   pause(): number {
     this.intent += 1;
-    const ctx = this.getCtxSync();
+    const ctx = this.keeper.getCtxSync();
     const elapsed = ctx ? Math.max(0, ctx.currentTime - this.startedAt) : 0;
     const pausedAt = Math.max(0, this.startOffset + elapsed);
     this.stopCurrentSource();
@@ -1027,13 +350,92 @@ class AudioEngine {
 
   setVolume(v: number) {
     this.volume = v;
-    if (this.gainNode) this.gainNode.gain.value = v * SAMPLE_GAIN_BOOST;
+    if (this.keeper.gain) this.keeper.gain.gain.value = v * SAMPLE_GAIN_BOOST;
   }
 
   getCurrentTime(): number {
-    const ctx = this.getCtxSync();
+    const ctx = this.keeper.getCtxSync();
     if (!ctx || !this.currentSource) return 0;
     return Math.max(0, this.startOffset + (ctx.currentTime - this.startedAt));
+  }
+
+  /**
+   * Is the output live *right now* — context running and its clock moving?
+   *
+   * The player asks before deciding where a click goes. Waiting for the
+   * engine to come back is what the delay after a desktop switch actually
+   * is: a rebuild, two bounded resumes and a probe, all before the first
+   * sound. If the answer here is no, the element can have it immediately.
+   */
+  isOutputLive(): boolean {
+    return this.keeper.getCtxSync() !== null;
+  }
+
+  /**
+   * Note that the user has asked for a sample, now.
+   *
+   * Called at the top of both play paths, and by the player before it starts
+   * the element, so every route to sound is measured from the same instant.
+   */
+  noteRequest(path: string): void {
+    const now = performance.now();
+    // Measure from the press, not from the moment this line finally ran.
+    // Otherwise a start that the user waited a third of a second for is
+    // recorded as 0ms, because by the engine's reckoning it was instant — it
+    // was asked late. That gap is the one part of "it feels delayed" the
+    // instrumentation could not see, and it is logged separately so the two
+    // halves of the wait can be told apart.
+    const pressedAt = lastInput();
+    const queued = now - pressedAt;
+    const attributable = pressedAt > 0 && queued >= 0 && queued < INPUT_ATTRIBUTION_MS;
+    this.requestedAt = attributable ? pressedAt : now;
+    if (attributable && queued >= 1) alog('start:queued', { path, ms: Math.round(queued) });
+    this.requestedPath = path;
+    this.answered = false;
+    if (this.silenceTimer !== null) clearTimeout(this.silenceTimer);
+    // Silence used to be the one failure that left nothing behind. Every
+    // other outcome logs itself: a start is timed, a slow one dumps the ring.
+    // A click that simply produced no sound reached none of that code, so the
+    // report "I clicked a sample and nothing played, the next one was fine"
+    // had no evidence at all behind it. Now it does.
+    this.silenceTimer = window.setTimeout(() => {
+      this.silenceTimer = null;
+      if (this.answered || this.requestedPath !== path) return;
+      alog('start:silent', { path, ms: Math.round(performance.now() - this.requestedAt) });
+      this.dumpLog('no sound');
+    }, NO_SOUND_MS);
+  }
+
+  /**
+   * Note that sound actually began, and how it got there.
+   *
+   * `via` is the whole point: 'sync' is the instant path, 'async' means the
+   * context had to be woken first, 'element' means the engine could not take
+   * it at all. A delay complaint is one of those three with a number on it.
+   */
+  noteAudible(path: string, via: 'sync' | 'async' | 'element'): void {
+    if (this.requestedPath === path) this.answered = true;
+    const ms = this.requestedPath === path ? Math.round(performance.now() - this.requestedAt) : -1;
+    alog('start:audible', { path, via, ms });
+    if (ms >= SLOW_START_MS) this.dumpLog(`slow-start ${via} ${ms}ms`);
+  }
+
+  /**
+   * Write the event ring to `<app data>/audio-log.txt`.
+   *
+   * Throttled, and deliberately automatic: asking someone to reproduce a bug
+   * and then copy a log before they restart is asking them to be a debugger
+   * while they are trying to make music.
+   */
+  private dumpLog(reason: string): void {
+    const now = performance.now();
+    if (now - this.lastDumpAt < LOG_DUMP_THROTTLE_MS) return;
+    this.lastDumpAt = now;
+    const text = `\n===== ${new Date().toISOString()} ${reason}\n${this.recentLog()}`;
+    invoke('append_audio_log', { text }).catch(() => {
+      // Browser mode, or the command is missing — the in-memory ring and the
+      // Copy log button still work.
+    });
   }
 
   isActive(): boolean {
@@ -1051,28 +453,18 @@ class AudioEngine {
   }
 
   /** Pre-decode the surrounding tracks so they're ready before the user gets there */
-  prefetchAround(assets: { path: string; type: string }[], currentIndex: number) {
-    const start = Math.max(0, currentIndex - PREFETCH_RADIUS);
-    const end = Math.min(assets.length - 1, currentIndex + PREFETCH_RADIUS);
-    for (let i = start; i <= end; i++) {
-      if (assets[i].type === 'sample') {
-        this.prefetch(assets[i].path);
-      }
-    }
+  prefetchAround(assets: { path: string; type: string }[], currentIndex: number): void {
+    this.buffers.prefetchAround(assets, currentIndex);
   }
 
   /** Check if a buffer is already cached and ready for immediate playback */
   isBufferCached(path: string): boolean {
-    return this.cache.has(path);
+    return this.buffers.has(path);
   }
 
   /** Get cache statistics for debugging */
   getCacheStats(): { size: number; maxSize: number; paths: string[] } {
-    return {
-      size: this.cache.size,
-      maxSize: CACHE_MAX,
-      paths: Array.from(this.cache.keys())
-    };
+    return this.buffers.stats();
   }
 
   /**
@@ -1081,6 +473,34 @@ class AudioEngine {
    * `ctxState: 'running'` + a non-zero gain on a machine with no sound is the
    * fingerprint of the "context muted despite running" hypothesis.
    */
+  /**
+   * Throw the context away and build a fresh one, ignoring every guard.
+   *
+   * This is the button that used to be "quit Stack and open it again". It
+   * deliberately does not go through `recoverOutput`: the whole point is to
+   * be usable when that is wedged.
+   */
+  restartEngine(): Promise<void> {
+    return this.keeper.restart();
+  }
+
+  /**
+   * Record an event in the ring from outside the engine.
+   *
+   * The player knows something the engine cannot: which sample the interface
+   * is actually showing. A start that disagrees with it is the wrong-sample
+   * bug happening, and this is what makes it visible in the log rather than
+   * only to the user's ears.
+   */
+  note(event: string, data?: Record<string, unknown>): void {
+    alog(event, data);
+  }
+
+  /** The recent audio event ring, oldest first, as plain text. */
+  recentLog(): string {
+    return formatLog(`# stack audio\n# ${JSON.stringify(this.debugSnapshot())}\n`);
+  }
+
   debugSnapshot(): {
     ctxExists: boolean;
     ctxState: AudioContextState | 'none';
@@ -1092,8 +512,11 @@ class AudioEngine {
     currentPath: string | null;
     cacheSize: number;
     userActivationActive: boolean | null;
+    /** How long since the clock was last seen to advance; null if never. */
+    clockAgeMs: number | null;
+    recovering: boolean;
   } {
-    const ctx = this.ctx;
+    const ctx = this.keeper.ctx;
     return {
       ctxExists: !!ctx,
       ctxState: ctx ? ctx.state : 'none',
@@ -1103,11 +526,13 @@ class AudioEngine {
         ctx && 'outputLatency' in ctx
           ? (ctx as AudioContext & { outputLatency: number }).outputLatency
           : null,
-      gainValue: this.gainNode ? this.gainNode.gain.value : null,
+      gainValue: this.keeper.gain ? this.keeper.gain.gain.value : null,
       volume: this.volume,
       currentPath: this.currentPath,
-      cacheSize: this.cache.size,
+      cacheSize: this.buffers.size,
       userActivationActive: userActivationActive(),
+      clockAgeMs: this.keeper.clockAgeMs(),
+      recovering: this.keeper.repairing,
     };
   }
 
@@ -1118,7 +543,7 @@ class AudioEngine {
    * Returns the context state so the caller can display it.
    */
   async playTestTone(): Promise<AudioContextState> {
-    const ctx = await this.getCtxAsync();
+    const ctx = await this.keeper.getCtxAsync();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
@@ -1135,27 +560,20 @@ class AudioEngine {
 
   /** Clear all cached buffers - used when folders are deleted */
   clearCache(): void {
-    this.cache.clear();
-    console.log('Audio engine cache cleared');
+    this.buffers.clear();
+    alog('cache:cleared');
   }
 
-  /** Clear cached buffers for specific paths - used when specific files are deleted */
+  /** Clear cached buffers for specific paths — for files that left the disk. */
   clearCacheForPaths(paths: string[]): void {
-    let cleared = 0;
-    for (const path of paths) {
-      if (this.cache.delete(path)) {
-        cleared++;
-      }
-    }
-    if (cleared > 0) {
-      console.log(`Audio engine cache cleared for ${cleared} paths`);
-    }
+    const cleared = this.buffers.clearPaths(paths);
+    if (cleared > 0) alog('cache:cleared-paths', { cleared });
   }
 
   /** Ensure AudioContext is ready for immediate playback - call this during rapid navigation */
   async ensureContextReady(): Promise<void> {
     try {
-      await this.getCtxAsync();
+      await this.keeper.getCtxAsync();
     } catch (error) {
       console.warn('Failed to prepare AudioContext:', error);
     }
