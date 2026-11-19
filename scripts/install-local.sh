@@ -47,7 +47,16 @@ if [ "${1:-}" != "--no-build" ]; then
   # this says which copy is installed, which is the question that could not be
   # answered while several builds of the same version were going on and off
   # the machine in one afternoon.
-  BUILD="$(node -p "JSON.parse(require('fs').readFileSync('$BUILD_FILE','utf8')).build + 1" 2>/dev/null || echo 1)"
+  # A missing file is a first build and legitimately counts 1. A node that
+  # will not run, an unreadable file or malformed JSON is not — falling back
+  # to 1 there silently restarts a counter whose only job is to be monotonic,
+  # and the number on screen then names a build that already existed.
+  if [ -f "$BUILD_FILE" ]; then
+    BUILD="$(node -p "JSON.parse(require('fs').readFileSync('$BUILD_FILE','utf8')).build + 1")" || {
+      echo "!! cannot read $BUILD_FILE — refusing to restart the build count"; exit 1; }
+  else
+    BUILD=1
+  fi
   printf '{\n  "build": %s\n}\n' "$BUILD" > "$BUILD_FILE"
   echo ":: building $APP_NAME (build $BUILD)"
   # Updater artifacts are turned off for a local install: signing them needs
