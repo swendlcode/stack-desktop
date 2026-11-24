@@ -182,7 +182,14 @@ export function usePlayer() {
   const stopFallback = () => {
     pendingSeekRef.current = null;
     fallbackWantRef.current = null;
-    if (!fallbackActiveRef.current) return;
+    // Pause unconditionally. `fallbackActiveRef` only goes true once the
+    // element has reached `playing`, so it is still false for a `play()` that
+    // is already in flight — and returning early on that was how a sample
+    // ended up starting twice: the decode won the race, the engine started,
+    // nothing stopped the element, and its sound arrived ~20ms behind the
+    // engine's. Two copies of the same hit, slightly apart, which on a drum
+    // fill is a flam and on a loop is comb filtering. Pausing an element that
+    // is already paused costs nothing.
     audioRef.current?.pause();
     fallbackActiveRef.current = false;
   };
@@ -227,6 +234,14 @@ export function usePlayer() {
         const want = fallbackWantRef.current;
         if (want && want.path === path) playFallbackRef.current(want.path, want.offset);
       } catch (err) {
+        // Unlatch, or this sample can never be loaded into the element again.
+        // `fallbackSrcRef` is set before the fetch so a second call for the
+        // same path does not start a second read; on failure it has to be
+        // released, otherwise every later `startFallback(path)` finds the
+        // path already "primed", never retries, and never plays — and when
+        // the engine is also down that is permanent silence on that one
+        // sample for the rest of the session.
+        if (fallbackSrcRef.current === path) fallbackSrcRef.current = null;
         audioEngine.note('element:load-failed', { path, err: String(err) });
       }
     })();
@@ -263,6 +278,15 @@ export function usePlayer() {
         // silent until it was restarted. The claim now follows the sound.
         if (audioEngine.isPlayingPath(path)) {
           audio.pause();
+          // And give the claim up with the sound. Leaving `fallbackActiveRef`
+          // true here — set a moment earlier by the `playing` event — left a
+          // *paused* element holding the sample, which disarms the two paths
+          // that exist to rescue a silent click (`onStartFailed` and
+          // `onContextRestored` both bail when the element claims it) and
+          // sends a seek into an element that is not playing. A click after
+          // that produced no sound at all.
+          fallbackActiveRef.current = false;
+          fallbackWantRef.current = null;
           return;
         }
         fallbackActiveRef.current = true;
@@ -687,10 +711,19 @@ export function usePlayer() {
     // one" report — and this is the line in the log that proves it.
     const onEngineStart = (e: Event) => {
       const started = (e as CustomEvent<{ path: string }>).detail?.path;
-      const shown = usePlayerStore.getState().currentAsset?.path ?? null;
-      if (started && shown && started !== shown) {
-        audioEngine.note('start:mismatch', { started, shown });
-      }
+      if (!started) return;
+      // Compared a turn of the event loop later, not now. A row click starts
+      // the engine *before* it writes the store — that is the whole point of
+      // the synchronous hot path — so comparing immediately flagged every
+      // ordinary click as a mismatch. 368 of the ~1,900 lines in the recorded
+      // log are this false positive, crowding the 300-event ring that the
+      // silence dump is supposed to explain.
+      window.setTimeout(() => {
+        const shown = usePlayerStore.getState().currentAsset?.path ?? null;
+        if (shown && started !== shown) {
+          audioEngine.note('start:mismatch', { started, shown });
+        }
+      }, 0);
     };
     window.addEventListener('audioEnginePlaybackStart', onEngineStart);
 
@@ -701,6 +734,16 @@ export function usePlayer() {
     const onFallbackPlaying = () => {
       const path = fallbackSrcRef.current;
       if (!path) return;
+      // Last line of defence against both routes sounding at once. `playing`
+      // fires earlier than the `play()` promise resolves, so this is the
+      // first moment the race can be called — and if the engine already has
+      // this sample, the element is a duplicate, not a fallback.
+      if (audioEngine.isPlayingPath(path)) {
+        audio.pause();
+        fallbackActiveRef.current = false;
+        fallbackWantRef.current = null;
+        return;
+      }
       // `playing` can beat the `play()` promise, so this is also where the
       // element's claim on the sample becomes true.
       if (fallbackWantRef.current?.path === path) fallbackActiveRef.current = true;
@@ -996,8 +1039,13 @@ export function usePlayer() {
         // The element keeps the sound until there is something to hand it to.
         const resumeAt = wasLive ? (audioRef.current?.currentTime ?? 0) : offset;
         if (audioEngine.playBuffer(assetPath, resumeAt)) {
-          if (wasLive) audioRef.current?.pause();
-          fallbackActiveRef.current = false;
+          // Unconditionally, not `if (wasLive)`. This decode and the element's
+          // own blob fetch read the same file over the same protocol and land
+          // within milliseconds of each other, so the usual loser is an
+          // element whose `play()` is in flight but has not reached `playing`
+          // yet — invisible to `wasLive`, and the second copy of the sample
+          // you then hear.
+          stopFallback();
         } else if (!wasLive) {
           // Neither route has made a sound. The element is at least loaded by
           // now, which is the condition its first attempt did not have.

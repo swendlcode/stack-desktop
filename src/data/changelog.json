@@ -1,4 +1,15 @@
 {
+  "1.0.29": {
+    "date": "2026-11-24",
+    "title": "One click, one sound",
+    "summary": "Fixes a sample occasionally sounding twice at once, and the silent click that could follow it.",
+    "highlights": [
+      "A sample plays once — fills and loops no longer double up on themselves.",
+      "The click that produced no sound at all now plays, and clicking the waveform to jump works after it.",
+      "A sample that failed to load once can be played again, instead of staying silent for the rest of the session.",
+      "Hovering a MIDI file no longer reads the whole file for nothing."
+    ]
+  },
   "1.0.28": {
     "date": "2026-11-17",
     "title": "Previews that stay audible, and a list that keeps up",

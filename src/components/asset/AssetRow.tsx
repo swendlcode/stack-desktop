@@ -492,7 +492,11 @@ export const AssetRow = memo(function AssetRow({
       // moving, because rows sliding under a stationary cursor fire this for
       // every one they pass.
       onPointerEnter={() => {
-        if (canPlay && !isScrollingNow()) audioEngine.prefetch(asset.path);
+        // Samples only. `canPlay` also covers MIDI, and a .mid handed to the
+        // audio decoder is a whole-file read that always ends in
+        // `EncodingError` — five of them in the recorded log, one per hover.
+        if (asset.type === "sample" && !isScrollingNow())
+          audioEngine.prefetch(asset.path);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
