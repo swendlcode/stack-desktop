@@ -267,11 +267,16 @@ function AudioDiagnostics() {
     ['Volume', snap.volume.toFixed(2)],
     ['Output latency', snap.outputLatency != null ? `${(snap.outputLatency * 1000).toFixed(1)} ms` : '—'],
     ['User gesture active', snap.userActivationActive === null ? 'unknown' : String(snap.userActivationActive)],
-    ['Decoded in cache', String(snap.cacheSize)],
+    ['Decoded in cache', `${snap.cacheSize} (${(snap.cacheBytes / 1e6).toFixed(0)} MB)`],
     // The one number that says whether the context is alive rather than
     // merely claiming to be: a clock that has not moved is a dead output,
     // whatever the state above reads.
     ['Clock last moved', snap.clockAgeMs == null ? 'not yet' : `${snap.clockAgeMs} ms ago`],
+    // The clock says the graph is rendering. These two say whether the render
+    // is reaching a device — the question four releases of recovery work had
+    // no way to ask, and the one the silent-after-refocus report turns on.
+    ['Output level', snap.outputPeak == null ? '—' : snap.outputPeak.toFixed(4)],
+    ['Output device', snap.outputDevice ?? 'not confirmed'],
     ['Recovering', snap.recovering ? 'yes' : 'no'],
   ];
 

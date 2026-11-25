@@ -297,6 +297,17 @@ export function usePlayer() {
           path,
           err: err instanceof Error ? err.name : String(err),
         });
+        // Only if nothing is making this sound already.
+        //
+        // The handback below assumes the element took the sample and the
+        // engine let go of it. That is not the only way to get here: when a
+        // decode lands while the element is still loading, the engine starts
+        // the sample AND the element's `play()` is aborted by the handover,
+        // one millisecond apart — and this then restarted a sample that was
+        // already playing. Two `playSync:start` / `playAsync:start` pairs two
+        // milliseconds apart in the capture, which is the retrigger behind
+        // the double-sample report.
+        if (audioEngine.isPlayingPath(path)) return;
         // Hand it back. The engine was told this sample was no longer wanted
         // the moment the element took it, so nothing is holding it any more —
         // and by now its context has usually finished resuming.
@@ -386,6 +397,10 @@ export function usePlayer() {
   };
   // Last `stopSeq` acted on, so a stop can be told apart from a pause.
   const stopSeqRef = useRef(0);
+  // Last `playSeq` acted on, so an explicit play request can be told apart
+  // from the asset merely changing underneath. See the block in the sample
+  // branch below for which of the two owns the start offset.
+  const playSeqRef = useRef(0);
 
   const {
     currentAsset,
@@ -403,6 +418,17 @@ export function usePlayer() {
   // being listed as effect dependencies (avoids stale closure + re-runs).
   const handleTrackEndRef = useRef<() => void>(() => {});
   handleTrackEndRef.current = () => {
+    // A sample that played to its end has no resume point. Both end routes —
+    // the engine's `onended` and the element's — arrive here, and both used
+    // to leave the last waveform click sitting in the resume slot: click into
+    // a sample at 3.2s, let it finish, press play on the row, and it starts
+    // at 3.2 again instead of at the beginning (issue #14). Stop looked like
+    // the cure only because stop is the one path that already cleared this.
+    //
+    // It is the same rule `startOffsetFor` applies to an offset past the end,
+    // one moment earlier: the playhead is at the end, and "play" there means
+    // play it again.
+    pausedAtRef.current = 0;
     // Read the live setting from the ref (fed by the settings query above), with
     // the query cache as a backup. Either way this no longer silently fails when
     // the cache happens to be empty.
@@ -786,7 +812,13 @@ export function usePlayer() {
         }
         return;
       }
-      // Sample seek
+      // Sample seek.
+      //
+      // Logged because this is the only route to a start that wrote nothing
+      // to the ring, and a capture full of unexplained `playAsync:start` is
+      // the result: holding an arrow key seeks at the key-repeat rate, each
+      // seek stops and restarts the source, and nothing said why.
+      audioEngine.note('seek', { path: current?.path ?? null, to: Number(time.toFixed(3)) });
       pausedAtRef.current = time;
       // Whichever path is making the sound is the one to seek. Routing a seek
       // into the engine while the element is playing left the element running
@@ -856,13 +888,27 @@ export function usePlayer() {
       midiNotesRef.current = [];
       midiDurationRef.current = 0;
 
-      // Detect asset switch — start from the requested offset (0 unless the
-      // caller clicked into a waveform), which every start path below honors.
+      // Where to start from, and the question is who asked.
+      //
+      // This used to key off the asset changing, which is not the same thing
+      // and was wrong in both directions. A `play(asset, 0)` aimed at the
+      // sample already loaded — clicking the filename on a row whose waveform
+      // was clicked at 3.2s a moment earlier — changed no asset, so the 0 was
+      // dropped and playback resumed at 3.2 (issue #14). And next/previous,
+      // which change the asset without making a request at all, inherited
+      // whatever offset the last waveform click had left behind.
+      //
+      // `playSeq` is the request. An asset that changed by any other route
+      // starts at the beginning, which is what every one of those routes
+      // means. The spacebar is untouched either way: it is `resume()`, a
+      // separate action that never comes through here.
+      const { pendingStartAt, playSeq } = usePlayerStore.getState();
+      const requested = playSeq !== playSeqRef.current;
       const assetChanged = currentAssetIdRef.current !== currentAsset.id;
-      if (assetChanged) {
-        currentAssetIdRef.current = currentAsset.id;
-        pausedAtRef.current = usePlayerStore.getState().pendingStartAt;
-      }
+      playSeqRef.current = playSeq;
+      currentAssetIdRef.current = currentAsset.id;
+      if (requested) pausedAtRef.current = pendingStartAt;
+      else if (assetChanged) pausedAtRef.current = 0;
 
       const isEdited = editorAssetId === currentAsset.id;
 

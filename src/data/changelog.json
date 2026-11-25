@@ -1,4 +1,15 @@
 {
+  "1.0.30": {
+    "date": "2026-11-25",
+    "title": "Keeping up",
+    "summary": "Browsing long samples stays fast, previews follow your output device, and a sample starts where you asked it to.",
+    "highlights": [
+      "Folders of long samples no longer slow Stack down \u2014 the sound keeps up with the row you are on.",
+      "Previews follow the system output when it changes while Stack is in the background.",
+      "A sample that played to its end starts again from the beginning, not from where you last clicked.",
+      "A sample no longer retriggers itself a moment after it starts."
+    ]
+  },
   "1.0.29": {
     "date": "2026-11-24",
     "title": "One click, one sound",

@@ -16,6 +16,9 @@
  *  - `audio/bufferCache.ts`    decoding and the buffer cache, with their own
  *                              offline context, deliberately independent of
  *                              the output.
+ *  - `audio/outputWitness.ts`  the tap that reads the signal, the device
+ *                              fingerprint and the idle re-arm — everything
+ *                              the clock cannot see.
  *  - `audio/webkit.ts`         the WKWebView-specific tests and guards.
  *  - `audio/diagnostics.ts`    the always-on event ring behind Settings →
  *                              Audio diagnostics → Copy log.
@@ -74,6 +77,8 @@ class AudioEngine {
     isCurrentTicket: (ticket) => ticket === this.intent,
     onRestored: () => this.onContextRestored?.(),
     onStartFailed: (path) => this.onStartFailed?.(path),
+    onSilentOutput: (path, peak, expected) => this.handleSilentOutput(path, peak, expected),
+    expectedPeak: (path, since, windowSec) => this.bufferPeak(path, since, windowSec),
     gainValue: () => this.volume * SAMPLE_GAIN_BOOST,
   });
 
@@ -254,9 +259,15 @@ class AudioEngine {
     const buffer = this.getBuffer(path);
     if (!buffer) {
       alog('playSync:buffer-miss', { path, userActivationActive: userActivationActive() });
-      // The decode that follows runs outside this gesture; make sure it has a
-      // live context to land in when it finishes.
-      this.keeper.heal();
+      // The decode that follows runs outside this gesture, so it needs a live
+      // context to land in — but only if there is not one already. `heal()`
+      // on a healthy context goes through `recoverOutput`, which costs a
+      // 120ms clock probe, and scrolling a list of uncached samples misses
+      // the buffer several times a second: the capture shows `recovery:skipped`
+      // every ~160ms, each one a probe of a context that was never in doubt.
+      // The cost is bearable; burying the one recovery that means something
+      // under dozens that do not is the real damage.
+      if (!this.keeper.getCtxSync()) this.keeper.heal();
       // Buffer not cached — sync fast path can't play. Critically, if a
       // DIFFERENT asset is currently playing through this engine, stop it
       // now. Otherwise the engine reports `isActive() === true` while the
@@ -414,10 +425,73 @@ class AudioEngine {
    * it at all. A delay complaint is one of those three with a number on it.
    */
   noteAudible(path: string, via: 'sync' | 'async' | 'element'): void {
+    // A second start for a request that has already been answered is a new
+    // sound, not a late one. Scrubbing a waveform restarts the same path
+    // several times a second through `registerSeek`, and measuring every one
+    // of those from the original click reported `start:audible ms:4486` for a
+    // sample nobody waited four seconds for — and dumped the ring as a slow
+    // start while it was at it. Re-arm the clock instead of inventing a delay.
+    if (this.answered && this.requestedPath === path) this.requestedAt = performance.now();
     if (this.requestedPath === path) this.answered = true;
     const ms = this.requestedPath === path ? Math.round(performance.now() - this.requestedAt) : -1;
     alog('start:audible', { path, via, ms });
     if (ms >= SLOW_START_MS) this.dumpLog(`slow-start ${via} ${ms}ms`);
+  }
+
+  /**
+   * Loudest sample in the decoded buffer over the span one tap read covers.
+   *
+   * Read from `startOffset` rather than from zero, because a click into a
+   * waveform starts partway in and comparing the tap against the top of the
+   * file would call every such start a failure.
+   */
+  private bufferPeak(path: string, sinceStartSec: number, windowSec: number): number | null {
+    const buffer = this.getBuffer(path);
+    if (!buffer) return null;
+    // Past the end of the sample nothing should be coming out, so nothing is
+    // missing when nothing does. Holding an arrow key parks the playhead just
+    // before the end and restarts there, which is a run of starts that are
+    // over before the first read — every one of them a false silence if the
+    // expected level were clamped to the last frames instead of saying zero.
+    if (this.startOffset + sinceStartSec > buffer.duration) return 0;
+    const rate = buffer.sampleRate;
+    const to = Math.min(buffer.length, Math.ceil((this.startOffset + sinceStartSec) * rate));
+    const from = Math.max(0, to - Math.ceil(windowSec * rate));
+    if (to <= from) return 0;
+    let peak = 0;
+    for (let c = 0; c < buffer.numberOfChannels; c += 1) {
+      const data = buffer.getChannelData(c);
+      for (let i = from; i < to; i += 1) {
+        const v = data[i] < 0 ? -data[i] : data[i];
+        if (v > peak) peak = v;
+      }
+    }
+    return peak;
+  }
+
+  /**
+   * A source started, the clock moved, and nothing came out.
+   *
+   * This event could not happen before the output tap existed: by every
+   * measure the engine had, such a click was a success, and it is the exact
+   * shape of the report that survived four releases of recovery work.
+   *
+   * Deliberately not re-routed to the element from here. The witness answers
+   * two thirds of a second after the click, and restarting the sample then
+   * would be a jarring second attack on the quiet intro that is the obvious
+   * false positive. A re-check is the honest response: `recoverOutput`
+   * compares the device fingerprint, and if the default output moved while
+   * the app was away it rebuilds on the right one — after which the player
+   * replays a request this recent of its own accord.
+   */
+  private handleSilentOutput(path: string, peak: number, expected: number): void {
+    alog('output:silent', {
+      path,
+      peak: Number(peak.toFixed(5)),
+      expected: Number(expected.toFixed(5)),
+    });
+    this.dumpLog('silent output');
+    void this.keeper.recoverOutput();
   }
 
   /**
@@ -453,7 +527,10 @@ class AudioEngine {
   }
 
   /** Pre-decode the surrounding tracks so they're ready before the user gets there */
-  prefetchAround(assets: { path: string; type: string }[], currentIndex: number): void {
+  prefetchAround(
+    assets: { path: string; type: string; durationMs?: number | null }[],
+    currentIndex: number,
+  ): void {
     this.buffers.prefetchAround(assets, currentIndex);
   }
 
@@ -511,9 +588,15 @@ class AudioEngine {
     volume: number;
     currentPath: string | null;
     cacheSize: number;
+    /** What those buffers weigh. The count says nothing about the cost. */
+    cacheBytes: number;
     userActivationActive: boolean | null;
     /** How long since the clock was last seen to advance; null if never. */
     clockAgeMs: number | null;
+    /** Loudest sample crossing the output tap right now; null without one. */
+    outputPeak: number | null;
+    /** The device the context proved itself on; null until a start was heard. */
+    outputDevice: string | null;
     recovering: boolean;
   } {
     const ctx = this.keeper.ctx;
@@ -530,8 +613,11 @@ class AudioEngine {
       volume: this.volume,
       currentPath: this.currentPath,
       cacheSize: this.buffers.size,
+      cacheBytes: this.buffers.byteSize,
       userActivationActive: userActivationActive(),
       clockAgeMs: this.keeper.clockAgeMs(),
+      outputPeak: this.keeper.outputPeak(),
+      outputDevice: this.keeper.outputDevice(),
       recovering: this.keeper.repairing,
     };
   }

@@ -10,8 +10,17 @@ interface PlayerStore {
   currentTime: number;
   duration: number;
   bpmSync: number | null;
-  /** Seconds to start from on the next asset switch — set by play(asset, startAt). */
+  /** Seconds the next play() asked to start from. Read via `playSeq`, not asset identity. */
   pendingStartAt: number;
+  /**
+   * Bumped by `play()`. `pendingStartAt` used to be adopted only when the
+   * asset changed, which drops the offset of any play() aimed at the sample
+   * already loaded: clicking the waveform at 3.2s and then the filename on
+   * that same row asked for 0 and resumed at 3.2 (issue #14). It also carried
+   * a stale offset the other way, into the next/previous track, which never
+   * sets one. The request is what the user made; the asset is a coincidence.
+   */
+  playSeq: number;
   /**
    * Bumped by `stop()`. `pause()` and `stop()` both land on `isPlaying: false`,
    * so without this the player cannot tell "hold my place" from "back to the
@@ -46,17 +55,19 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   duration: 0,
   bpmSync: null,
   pendingStartAt: 0,
+  playSeq: 0,
   stopSeq: 0,
   seekTo: null,
 
   play: (asset, startAt = 0) =>
-    set({
+    set((s) => ({
       currentAsset: asset,
       isPlaying: true,
       currentTime: startAt,
       duration: 0,
       pendingStartAt: startAt,
-    }),
+      playSeq: s.playSeq + 1,
+    })),
   /** Hold the playhead — the transport control and the spacebar. */
   pause: () => set({ isPlaying: false }),
   resume: () => set({ isPlaying: true }),

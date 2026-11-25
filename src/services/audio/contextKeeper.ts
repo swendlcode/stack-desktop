@@ -13,6 +13,13 @@
  *  - Never await a WebKit audio promise unbounded. `resume()` parks rather
  *    than rejecting, and an await behind a single-flight guard that never
  *    settles is an engine that stays dead until the app is restarted.
+ *
+ * And a third, which the logs forced and which the first one has to make room
+ * for: the clock is an honest witness to the graph, not to the output. Across
+ * every recorded blur/focus pair the context stays running and its clock
+ * advances in lockstep with wall time, no recovery event has ever fired, and
+ * the sound was still gone. Everything in `outputWitness.ts` exists because
+ * nothing in here measured whether the render reached a device.
  */
 
 import {
@@ -25,6 +32,7 @@ import {
   START_VERIFY_MS,
 } from './constants';
 import { alog } from './diagnostics';
+import { OutputWitness } from './outputWitness';
 import { isRunning, settleWithin, userActivationActive } from './webkit';
 import type { BufferCache } from './bufferCache';
 
@@ -40,6 +48,10 @@ export interface KeeperHooks {
   onRestored: () => void;
   /** A source started and was not heard. */
   onStartFailed: (path: string) => void;
+  /** A source started, the clock moved, and the output carried no signal. */
+  onSilentOutput: (path: string, peak: number, expected: number) => void;
+  /** Loudest sample in the decoded buffer over the window a tap read covers. */
+  expectedPeak: (path: string, sinceStartSec: number, windowSec: number) => number | null;
   /** Gain value for a freshly built node. */
   gainValue: () => number;
 }
@@ -66,6 +78,9 @@ export class ContextKeeper {
   private ctxInit: Promise<void> | null = null;
   // Last observed audio-clock value and the wall time it was observed at.
   private clockMark = { ctx: 0, wall: 0 };
+  // Watches the signal rather than the clock: the output tap, the device
+  // fingerprint and the idle re-arm. See outputWitness.ts for why.
+  private witness = new OutputWitness();
 
   constructor(
     private buffers: BufferCache,
@@ -117,6 +132,13 @@ export class ContextKeeper {
     return this.ctx!;
   }
 
+  // Distinguishes one context from the next in the log. The first capture
+  // showed `ctx:statechange {"ctxState":"closed"}` four milliseconds after a
+  // replacement came up, which reads as the new context dying and is in fact
+  // the old one finishing its close — the listeners are per-context and
+  // nothing said which was speaking.
+  private ctxSeq = 0;
+
   private async createContext(): Promise<void> {
     const Ctor =
       window.AudioContext ||
@@ -135,7 +157,9 @@ export class ContextKeeper {
     this.gain.gain.value = this.hooks.gainValue();
     // The key diagnostic: was the context born inside a user gesture? On WebKit
     // a context created without one can report 'running' yet stay muted.
+    this.ctxSeq += 1;
     alog('ctx:construct', {
+      ctx: this.ctxSeq,
       stateAfterCtor: this.ctx.state,
       sampleRate: this.ctx.sampleRate,
       userActivationActive: userActivationActive(),
@@ -153,8 +177,8 @@ export class ContextKeeper {
     // reader establishes the baseline and the stall check runs from there.
     this.clockMark = { ctx: 0, wall: 0 };
     this.wireOutput();
-    this.watchContextState(this.ctx);
-    this.probeNewContext(this.ctx);
+    this.watchContextState(this.ctx, this.ctxSeq);
+    this.probeNewContext(this.ctx, this.ctxSeq);
     this.bindGlobalListeners();
   }
 
@@ -163,9 +187,9 @@ export class ContextKeeper {
    * `rebuildContext` — a single "already bound" flag used to leave every
    * context after the first one unwatched.
    */
-  private watchContextState(ctx: AudioContext) {
+  private watchContextState(ctx: AudioContext, id: number) {
     ctx.addEventListener('statechange', () => {
-      alog('ctx:statechange', { ctxState: ctx.state });
+      alog('ctx:statechange', { ctx: id, ctxState: ctx.state });
       if (this.ctx === ctx && !isRunning(ctx) && ctx.state !== 'closed') {
         ctx.resume().catch(() => {
           alog('ctx:auto-resume-failed', { ctxState: ctx.state });
@@ -237,11 +261,16 @@ export class ContextKeeper {
     }
   }
 
-  /** The two numbers that say whether the output is alive. */
+  /** What the output looked like at this instant, for the log ring. */
   private contextVitals(): Record<string, unknown> {
+    const ctx = this.ctx;
     return {
-      ctxState: this.ctx?.state ?? 'none',
-      ctxTime: this.ctx ? Number(this.ctx.currentTime.toFixed(3)) : null,
+      ctxState: ctx?.state ?? 'none',
+      ctxTime: ctx ? Number(ctx.currentTime.toFixed(3)) : null,
+      // Recorded on both sides of every app switch. Until this was here the
+      // log could not answer the one question that mattered on a refocus:
+      // is this still the same output device?
+      device: ctx ? this.witness.fingerprintOf(ctx) : null,
     };
   }
 
@@ -253,15 +282,26 @@ export class ContextKeeper {
    * starts, no amount of work in here can fix this and playback has to leave
    * the webview. The answer lands in the log ring either way.
    */
-  private probeNewContext(ctx: AudioContext) {
+  private probeNewContext(ctx: AudioContext, id: number) {
+    const born = ctx.currentTime;
     [0, 100, 500].forEach((delay) => {
       window.setTimeout(() => {
         if (this.ctx !== ctx) return;
         alog('ctx:probe', {
+          ctx: id,
           at: delay,
           ctxState: ctx.state,
           ctxTime: Number(ctx.currentTime.toFixed(4)),
         });
+        // Identify the device here too, not only from a played sample.
+        // Taking it only from a start left a context rebuilt while the user
+        // was reading the list unidentified until they next clicked
+        // something — ninety-one seconds of `verdict: unknown` in the first
+        // capture, every one of them blind to a second device change. A clock
+        // that has moved since construction is the same proof a start gives.
+        if (delay === 500 && isRunning(ctx) && ctx.currentTime > born) {
+          this.witness.confirm(ctx);
+        }
       }, delay);
     });
   }
@@ -337,7 +377,11 @@ export class ContextKeeper {
     }
     if (this.ctx !== ctx) return; // replaced while we were awaiting
 
-    if (isRunning(ctx) && (await this.isClockAdvancing(ctx))) return;
+    if (isRunning(ctx) && (await this.isClockAdvancing(ctx))) {
+      if (this.ctx !== ctx) return;
+      await this.checkOutputDevice(ctx);
+      return;
+    }
     if (this.ctx !== ctx) return;
 
     // The rebuild is no longer deferred. It was, to keep a click that landed
@@ -368,6 +412,40 @@ export class ContextKeeper {
     // engine's: only the store knows what is selected and whether the user
     // actually asked for sound.
     this.hooks.onRestored();
+  }
+
+  /**
+   * The refocus path, for a context that is healthy by every old measure.
+   *
+   * This is where every app switch actually ends up, and until now it was a
+   * bare `return`. The context is running, the clock is advancing, and the
+   * report is still that the sound is gone — so the two things left to check
+   * are the ones the clock cannot see.
+   *
+   * A changed fingerprint means the default output moved while the window was
+   * away and this context is still bound to the device it was built on:
+   * running, clocking, every start reported audible, nothing heard. That is
+   * the only mechanism consistent with the whole log, and the rebuild is the
+   * fix. Every recovery trigger written before this one keys off the clock,
+   * which is why none of them has ever fired.
+   */
+  private async checkOutputDevice(ctx: AudioContext): Promise<void> {
+    const verdict = this.witness.compare(ctx);
+    if (verdict === 'changed') {
+      alog('devices:changed', {
+        was: this.witness.identity,
+        now: this.witness.fingerprintOf(ctx),
+      });
+      await this.rebuildContext(false);
+      await this.getCtxAsync().catch(() => {});
+      this.hooks.onRestored();
+      return;
+    }
+    // Logged rather than silent. This early return is the one every refocus
+    // takes, and its invisibility is why four releases of work could look
+    // like they were running when they never ran at all.
+    alog('recovery:skipped', { reason: 'clock-advancing', verdict, ...this.contextVitals() });
+    this.witness.rearm(ctx);
   }
 
   /**
@@ -424,11 +502,33 @@ export class ContextKeeper {
    * then route the sample somewhere audible.
    */
   verifyStarted(ctx: AudioContext, ticket: number) {
+    const stillWanted = () => this.ctx === ctx && this.hooks.isCurrentTicket(ticket);
+    this.witness.noteStart();
+    const path = this.hooks.currentPath();
+    // The clock check below answers "did the graph render?". This answers
+    // "did anything come out?", which is the question four releases of
+    // recovery work could not ask.
+    if (path) {
+      this.witness.watch(
+        path,
+        this.gain?.gain.value ?? 0,
+        ctx.sampleRate,
+        stillWanted,
+        (since, windowSec) => this.hooks.expectedPeak(path, since, windowSec),
+        (silentPath, peak, expected) =>
+          this.hooks.onSilentOutput(silentPath, peak, expected),
+      );
+    }
     const before = ctx.currentTime;
     window.setTimeout(() => {
-      if (this.ctx !== ctx || !this.hooks.isCurrentTicket(ticket)) return;
+      if (!stillWanted()) return;
       if (ctx.currentTime > before) {
         this.markClock(ctx);
+        // A start that was heard is the only honest moment to fingerprint the
+        // device: `outputLatency` reads zero until something has actually
+        // been rendered, so a baseline taken at construction is a false
+        // device change waiting for the first app switch.
+        this.witness.confirm(ctx);
         return;
       }
       alog('ctx:started-but-silent', { ctxState: ctx.state });
@@ -490,7 +590,10 @@ export class ContextKeeper {
   private wireOutput(): void {
     if (!this.ctx || !this.gain) return;
     try { this.gain.disconnect(); } catch { /* nothing connected */ }
-    this.gain.connect(this.ctx.destination);
+    // Not straight to the destination any more. The witness inserts its tap
+    // here and connects the rest of the way, so every sample this app makes
+    // passes something that can say whether it carried any signal at all.
+    this.witness.attach(this.ctx, this.gain);
   }
 
   /**
@@ -511,6 +614,9 @@ export class ContextKeeper {
     const old = this.ctx;
     this.ctx = null;
     this.gain = null;
+    // The tap, the fingerprint and the idle mark all belong to the context
+    // that is going away; the replacement establishes its own.
+    this.witness.detach();
     if (old && old.state !== 'closed') {
       // Not awaited. Closing a context whose device has gone away can take as
       // long as it likes, and nothing downstream needs it finished — the
@@ -540,6 +646,16 @@ export class ContextKeeper {
   /** Is a repair in flight? */
   get repairing(): boolean {
     return this.recovering !== null || this.healing !== null;
+  }
+
+  /** Loudest sample currently crossing the output tap; null without one. */
+  outputPeak(): number | null {
+    return this.witness.peak();
+  }
+
+  /** The device this context proved itself on; null until a start was heard. */
+  outputDevice(): string | null {
+    return this.witness.identity;
   }
 
   /** How long since the clock was last seen to advance; null if never. */

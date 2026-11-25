@@ -10,6 +10,18 @@
 export const PREFETCH_RADIUS = 3;
 // Max decoded buffers to keep in memory (~5–10 MB each for a typical sample)
 export const CACHE_MAX = 20;
+// And a ceiling on what they weigh, because the count says nothing about the
+// cost. A decoded buffer is Float32 per channel: a five-and-a-half minute
+// stereo stem is 117.7MB in memory from an 88MB file, and a folder of 73 of
+// them let the count cap authorise 2.3GB. Eight were decoded in one pass of
+// the arrow key in the recorded capture.
+export const CACHE_MAX_BYTES = 512 * 1024 * 1024;
+// The longest sample worth decoding on spec. Clicking one still decodes it —
+// the user asked. Reading six neighbours off disk at 88MB each because the
+// selection passed nearby is what stalled the main thread for 148ms a press
+// and put the sound a row behind the list: eight `start:mismatch` in a row,
+// every one of them a sample the user could hear but was not looking at.
+export const PREFETCH_MAX_SECONDS = 30;
 // Extra output gain for sample preview playback so perceived loudness is higher.
 export const SAMPLE_GAIN_BOOST = 2;
 // How long to watch the context clock before calling it stalled. Long enough to
@@ -60,3 +72,28 @@ export const NO_SOUND_MS = 700;
 // clicks, so a start that was not triggered by a press is not blamed on an
 // unrelated one.
 export const INPUT_ATTRIBUTION_MS = 1000;
+
+// ─── Watching the signal rather than the clock ───────────────────────────────
+
+// Below this peak, the output carried nothing. -80 dBFS: far under anything
+// audible, far over the denormals a decoded sample leaves behind. Read after
+// the master gain, so it is a measurement of what left the app.
+export const SILENT_PEAK = 1e-4;
+// How far under the sample's own level the output has to read before it counts
+// as silence. The first capture proved why an absolute floor is not enough: a
+// drum fill with a quiet lead-in read 0.00136 at the tap and was right to, and
+// a 53-second loop whose first 700ms are digital silence read exactly 0 and
+// was reported as a failure when nothing had gone wrong. The honest question
+// is not "did anything come out" but "did what should have come out, come
+// out", and 26 dB down on the sample's own peak is not a quiet intro.
+export const SILENT_SHORTFALL = 20;
+// When to read the output tap after a start. Several reads rather than one: a
+// one-shot can be over before a single late read, and a pad with a slow attack
+// is still under the floor at an early one. The peak across the window is the
+// answer.
+export const WITNESS_SAMPLES_MS = [60, 120, 220, 380, 600];
+// How long the output may sit idle before coming back to the window re-arms
+// it. A context that has rendered nothing for a while takes most of a second
+// to produce its first sound again — 662, 669 and 909ms in the recorded logs,
+// every one of them on a context that was running with its clock advancing.
+export const REARM_IDLE_MS = 2000;
