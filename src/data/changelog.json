@@ -1,4 +1,12 @@
 {
+  "1.0.31": {
+    "date": "2026-11-25",
+    "title": "No lost click",
+    "summary": "Switching headphones or speakers while Stack is in the background no longer costs you the first click.",
+    "highlights": [
+      "The first sample you click after changing your output device plays straight away, instead of arriving a moment later."
+    ]
+  },
   "1.0.30": {
     "date": "2026-11-25",
     "title": "Keeping up",

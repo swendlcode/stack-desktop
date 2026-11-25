@@ -243,7 +243,35 @@ export class ContextKeeper {
         if (ctx && ctx.state !== 'closed' && !isRunning(ctx)) {
           ctx.resume().catch(() => {});
         }
-        if (this.backgroundSinceLastCheck) void this.recoverOutput();
+        if (this.backgroundSinceLastCheck) {
+          // The device check runs here too, and synchronously, because
+          // `recoverOutput` cannot answer in time. It probes the clock for
+          // 120ms; the click handler runs in two. A capture of the real
+          // failure shows exactly that gap — the output changed to a
+          // Bluetooth device during nine minutes in the background, the press
+          // started a source into a context still bound to the old one, and
+          // the rebuild arrived 128ms later. The user heard nothing for that
+          // click.
+          //
+          // The fingerprint is four property reads, so it fits in a pointer
+          // handler. A changed one means this context is bound to a device
+          // that is no longer there, and the fastest honest thing to do is
+          // tear it down before the click asks for it: `getCtxSync` then
+          // refuses, the click goes to the element — which needs no context
+          // at all — and the replacement is built behind it.
+          //
+          // `rebuildContext` awaits nothing, so `this.ctx` is null by the
+          // time this handler returns. That is the whole point; an async
+          // teardown would lose the race it exists to win.
+          if (ctx && this.witness.compare(ctx) === 'changed') {
+            alog('devices:changed-on-press', {
+              was: this.witness.identity,
+              now: this.witness.fingerprintOf(ctx),
+            });
+            void this.rebuildContext(false);
+          }
+          void this.recoverOutput();
+        }
       },
       true
     );
