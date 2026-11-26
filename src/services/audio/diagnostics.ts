@@ -46,6 +46,20 @@ export function formatLog(header: string): string {
   );
 }
 
+/**
+ * Empty the ring.
+ *
+ * A session that has been open for a day carries thousands of events, of which
+ * the handful describing the failure are buried in the middle — and the ring
+ * is capped, so the oldest of them fall out while the newest are still routine
+ * browsing. Clearing before reproducing something deliberately is the
+ * difference between a log that shows the fault and a log that shows what came
+ * after it.
+ */
+export function clearLog(): void {
+  logRing.length = 0;
+}
+
 /** How many events the ring is holding. */
 export function logLength(): number {
   return logRing.length;

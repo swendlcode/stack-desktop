@@ -3,6 +3,7 @@ pub mod genre_backfill;
 pub mod hasher;
 pub mod indexer;
 pub mod loop_type_backfill;
+pub mod playback;
 pub mod plugins;
 pub mod reconciler;
 pub mod scanner;
@@ -12,6 +13,7 @@ pub mod watcher;
 
 pub use hasher::hash_file;
 pub use indexer::{IndexJob, Indexer, JobPriority};
+pub use playback::{MidiNote, PlaybackState, Player};
 pub use reconciler::Reconciler;
 pub use scanner::{ScannedFile, Scanner};
 pub use watcher::{FileWatcher, WatchEvent};

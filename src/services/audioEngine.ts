@@ -35,10 +35,12 @@ import {
   SLOW_START_MS,
 } from './audio/constants';
 import { lastInput } from './audio/inputClock';
-import { alog, formatLog } from './audio/diagnostics';
+import { alog, clearLog as clearLogRing, formatLog } from './audio/diagnostics';
 import { clearOutputPrefs, isRunning, startOffsetFor, userActivationActive } from './audio/webkit';
 import { BufferCache } from './audio/bufferCache';
 import { ContextKeeper } from './audio/contextKeeper';
+import { isTauri } from '../lib/tauri-core';
+import { BackendEngine } from './audio/backendEngine';
 
 // An output preference set by an older build would still be in force with
 // nothing in the interface admitting it exists.
@@ -434,7 +436,25 @@ class AudioEngine {
     if (this.answered && this.requestedPath === path) this.requestedAt = performance.now();
     if (this.requestedPath === path) this.answered = true;
     const ms = this.requestedPath === path ? Math.round(performance.now() - this.requestedAt) : -1;
-    alog('start:audible', { path, via, ms });
+    // The one segment none of this can see is everything after `start()`.
+    // When the press-to-start path measures 0ms and the user still hears a
+    // delay, the remaining suspect is the device, and these two are the only
+    // numbers the platform offers about it.
+    //
+    // They are worth logging on every start because a figure that cannot be
+    // true is itself the evidence. A USB interface reporting 0.29ms of output
+    // latency is not a fast interface, it is a context that has not measured
+    // real hardware — the same reading the context in the silent capture
+    // carried while every other instrument called it healthy. Earlier logs
+    // from this machine show 15.8ms, which is what a real one looks like.
+    const ctx = this.keeper.ctx;
+    alog('start:audible', {
+      path,
+      via,
+      ms,
+      outLatMs: ctx ? Number((ctx.outputLatency * 1000).toFixed(2)) : null,
+      baseLatMs: ctx ? Number((ctx.baseLatency * 1000).toFixed(2)) : null,
+    });
     if (ms >= SLOW_START_MS) this.dumpLog(`slow-start ${via} ${ms}ms`);
   }
 
@@ -535,6 +555,16 @@ class AudioEngine {
   }
 
   /** Check if a buffer is already cached and ready for immediate playback */
+  /**
+   * Declines MIDI, so the caller falls back to its own Web Audio synth.
+   *
+   * The boolean is the same contract `playBuffer` uses: false means this
+   * engine did not take it and somebody else must.
+   */
+  playMidi(): boolean {
+    return false;
+  }
+
   isBufferCached(path: string): boolean {
     return this.buffers.has(path);
   }
@@ -551,17 +581,6 @@ class AudioEngine {
    * fingerprint of the "context muted despite running" hypothesis.
    */
   /**
-   * Throw the context away and build a fresh one, ignoring every guard.
-   *
-   * This is the button that used to be "quit Stack and open it again". It
-   * deliberately does not go through `recoverOutput`: the whole point is to
-   * be usable when that is wedged.
-   */
-  restartEngine(): Promise<void> {
-    return this.keeper.restart();
-  }
-
-  /**
    * Record an event in the ring from outside the engine.
    *
    * The player knows something the engine cannot: which sample the interface
@@ -576,6 +595,12 @@ class AudioEngine {
   /** The recent audio event ring, oldest first, as plain text. */
   recentLog(): string {
     return formatLog(`# stack audio\n# ${JSON.stringify(this.debugSnapshot())}\n`);
+  }
+
+  /** Drop every recorded event, so the next reproduction starts from nothing. */
+  clearLog(): void {
+    clearLogRing();
+    alog('log:cleared');
   }
 
   debugSnapshot(): {
@@ -598,6 +623,8 @@ class AudioEngine {
     /** The device the context proved itself on; null until a start was heard. */
     outputDevice: string | null;
     recovering: boolean;
+    /** Which engine produced this. The rows worth showing differ. */
+    backend: boolean;
   } {
     const ctx = this.keeper.ctx;
     return {
@@ -619,6 +646,7 @@ class AudioEngine {
       outputPeak: this.keeper.outputPeak(),
       outputDevice: this.keeper.outputDevice(),
       recovering: this.keeper.repairing,
+      backend: false,
     };
   }
 
@@ -667,4 +695,21 @@ class AudioEngine {
 }
 
 // Singleton — one engine for the whole app
-export const audioEngine = new AudioEngine();
+/**
+ * One of two engines, chosen once.
+ *
+ * In the desktop app the output device belongs to Rust. On WKWebView an
+ * `AudioContext` will sit in `running`, keep its clock honest, report an
+ * unchanged device and show signal on a tap inside its own graph while
+ * rendering to nothing, and the analyser that would catch it is before the
+ * destination by construction — so nothing measurable from in here separates
+ * that state from health. Four releases of detection and rebuild logic were
+ * written against it and each was routed around.
+ *
+ * Browser mode keeps the Web Audio engine, and must: the library is served
+ * over the network there, and the speakers attached to the machine running
+ * this process are not the ones the listener is sitting in front of.
+ */
+export const audioEngine: AudioEngine | BackendEngine = isTauri
+  ? new BackendEngine()
+  : new AudioEngine();

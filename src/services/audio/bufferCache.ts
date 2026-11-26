@@ -11,7 +11,13 @@
  */
 
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { CACHE_MAX, CACHE_MAX_BYTES, PREFETCH_MAX_SECONDS, PREFETCH_RADIUS } from './constants';
+import {
+  CACHE_MAX,
+  CACHE_MAX_BYTES,
+  PREFETCH_CONCURRENCY,
+  PREFETCH_MAX_SECONDS,
+  PREFETCH_RADIUS,
+} from './constants';
 import { alog } from './diagnostics';
 
 type CacheEntry = {
@@ -40,6 +46,10 @@ export class BufferCache {
   private readonly undecodable = new Set<string>();
   /** Total decoded bytes held. Kept in step with `entries` on every change. */
   private bytes = 0;
+  /** Speculative decodes running now. Requested ones are not counted here. */
+  private speculativeInFlight = 0;
+  /** Speculative decodes waiting for a slot, nearest-first. */
+  private pending: string[] = [];
 
   get size(): number {
     return this.entries.size;
@@ -62,15 +72,42 @@ export class BufferCache {
     return entry.buffer;
   }
 
-  /** Decode now if needed, and return the buffer. */
+  /**
+   * Decode now if needed, and return the buffer.
+   *
+   * This is the path the user is waiting on, so it ignores the speculative
+   * concurrency limit and starts immediately.
+   */
   async ensure(path: string): Promise<AudioBuffer | null> {
-    return this.get(path) ?? this.decode(path);
+    return this.get(path) ?? this.decode(path, true);
   }
 
-  /** Start a background decode. No-op if cached or already decoding. */
+  /** Queue a background decode. No-op if cached, failed or already running. */
   prefetch(path: string): void {
-    if (this.entries.has(path) || this.decoding.has(path)) return;
-    void this.decode(path);
+    if (this.entries.has(path) || this.decoding.has(path) || this.undecodable.has(path)) return;
+    if (this.speculativeInFlight >= PREFETCH_CONCURRENCY) {
+      if (!this.pending.includes(path)) this.pending.push(path);
+      return;
+    }
+    this.startSpeculative(path);
+  }
+
+  private startSpeculative(path: string): void {
+    this.speculativeInFlight += 1;
+    void this.decode(path).finally(() => {
+      this.speculativeInFlight -= 1;
+      this.drain();
+    });
+  }
+
+  /** Fill freed slots from the queue, skipping anything no longer worth doing. */
+  private drain(): void {
+    while (this.speculativeInFlight < PREFETCH_CONCURRENCY) {
+      const next = this.pending.shift();
+      if (next === undefined) return;
+      if (this.entries.has(next) || this.decoding.has(next) || this.undecodable.has(next)) continue;
+      this.startSpeculative(next);
+    }
   }
 
   /** Decode what the user is about to reach, in both directions. */
@@ -78,11 +115,23 @@ export class BufferCache {
     assets: { path: string; type: string; durationMs?: number | null }[],
     currentIndex: number,
   ): void {
-    const start = Math.max(0, currentIndex - PREFETCH_RADIUS);
-    const end = Math.min(assets.length - 1, currentIndex + PREFETCH_RADIUS);
-    for (let i = start; i <= end; i += 1) {
+    // Whatever was queued describes where the selection used to be. Holding
+    // onto it means a fast run down the arrow key builds a backlog of
+    // neighbourhoods the user has already left, and the samples next to where
+    // they actually stopped go to the back of it.
+    this.pending.length = 0;
+    // Nearest first, and forward before back. With a concurrency limit in
+    // place this order is suddenly load bearing: the loop used to run from
+    // `currentIndex - RADIUS` upward, so the two slots went to the rows three
+    // and two ABOVE the selection while the row the user was sitting on
+    // queued behind them. Index order was harmless only while every
+    // neighbour started at once.
+    const order: number[] = [currentIndex];
+    for (let d = 1; d <= PREFETCH_RADIUS; d += 1) order.push(currentIndex + d, currentIndex - d);
+    for (const i of order) {
+      if (i < 0 || i >= assets.length) continue;
       const asset = assets[i];
-      if (asset.type !== 'sample') continue;
+      if (!asset || asset.type !== 'sample') continue;
       // Speculative work has to be cheap or it is not worth doing. A stem
       // folder is the case that proves it: six neighbours at 88MB each,
       // fetched and decoded while the user is still moving, buy nothing and
@@ -96,6 +145,7 @@ export class BufferCache {
   clear(): void {
     this.entries.clear();
     this.decoding.clear();
+    this.pending.length = 0;
     this.undecodable.clear();
     this.bytes = 0;
     this.rate = null;
@@ -104,6 +154,7 @@ export class BufferCache {
   /** Drop in-flight decodes only — used when the output context is replaced. */
   dropPending(): void {
     this.decoding.clear();
+    this.pending.length = 0;
   }
 
   /** Forget specific samples, for files that have left the disk. */
@@ -128,13 +179,19 @@ export class BufferCache {
     return { size: this.entries.size, maxSize: CACHE_MAX, paths: [...this.entries.keys()] };
   }
 
-  private decode(path: string): Promise<AudioBuffer | null> {
+  private decode(path: string, urgent = false): Promise<AudioBuffer | null> {
     const existing = this.decoding.get(path);
     if (existing) return existing;
 
     if (this.undecodable.has(path)) return Promise.resolve(null);
 
     const job = (async (): Promise<AudioBuffer | null> => {
+      // Timed in two halves, because they fail for different reasons and the
+      // cure is different. Reading the file is the asset protocol and the
+      // disk; turning it into audio is the CPU. A log that says only that a
+      // decode happened cannot tell you which of the two the user waited for,
+      // and that was the whole of the evidence behind "it plays late".
+      const t0 = performance.now();
       try {
         const res = await fetch(convertFileSrc(path));
         if (!res.ok) {
@@ -142,12 +199,21 @@ export class BufferCache {
           return null;
         }
         const bytes = await res.arrayBuffer();
+        const fetched = performance.now();
         const buffer = await this.decodeCtx().decodeAudioData(bytes);
+        const decoded = performance.now();
         const weight = buffer.length * buffer.numberOfChannels * 4;
         this.evictIfNeeded(weight);
         this.entries.set(path, { buffer, lastUsed: Date.now(), bytes: weight });
         this.bytes += weight;
-        alog('decode:ok', { path, duration: buffer.duration });
+        alog('decode:ok', {
+          path,
+          duration: buffer.duration,
+          urgent,
+          fetchMs: Math.round(fetched - t0),
+          decodeMs: Math.round(decoded - fetched),
+          kb: Math.round(bytes.byteLength / 1024),
+        });
         return buffer;
       } catch (err) {
         // Remember it. One corrupt file in a library is not rare — 8.5MB of

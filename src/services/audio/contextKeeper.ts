@@ -24,8 +24,12 @@
 
 import {
   CLOCK_PROBE_MS,
+  CLOCK_RATE_MAX,
+  CLOCK_RATE_MIN,
   CLOCK_STALL_MS,
   GUARD_WATCHDOG_MS,
+  HEARTBEAT_MS,
+  HEARTBEAT_REPORT_EVERY,
   RESUME_ATTEMPTS,
   RESUME_RETRY_MS,
   RESUME_TIMEOUT_MS,
@@ -78,6 +82,14 @@ export class ContextKeeper {
   private ctxInit: Promise<void> | null = null;
   // Last observed audio-clock value and the wall time it was observed at.
   private clockMark = { ctx: 0, wall: 0 };
+  // The previous heartbeat sample. `wall: 0` means no baseline yet.
+  private heartbeat = { ctx: 0, wall: 0, tick: 0, device: '' };
+  // Has this context been seen to keep real time since it was built? Set only
+  // by the birth probe, and only across a window that really elapsed. Failing
+  // to earn it does not condemn a context, it only leaves it unproven.
+  private proven = false;
+  // Was this context constructed while a user gesture was active?
+  private bornInGesture = false;
   // Watches the signal rather than the clock: the output tap, the device
   // fingerprint and the idle re-arm. See outputWitness.ts for why.
   private witness = new OutputWitness();
@@ -158,11 +170,14 @@ export class ContextKeeper {
     // The key diagnostic: was the context born inside a user gesture? On WebKit
     // a context created without one can report 'running' yet stay muted.
     this.ctxSeq += 1;
+    const activation = userActivationActive();
+    this.proven = false;
+    this.bornInGesture = activation === true;
     alog('ctx:construct', {
       ctx: this.ctxSeq,
       stateAfterCtor: this.ctx.state,
       sampleRate: this.ctx.sampleRate,
-      userActivationActive: userActivationActive(),
+      userActivationActive: activation,
     });
     // Buffers decoded for the previous context are still good as long as the
     // rate matches, and keeping them matters: a cache miss drops the next
@@ -176,6 +191,9 @@ export class ContextKeeper {
     // which `getCtxSync` reads as "do not accuse it of stalling"; the first
     // reader establishes the baseline and the stall check runs from there.
     this.clockMark = { ctx: 0, wall: 0 };
+    // A replacement starts its own baseline. Comparing across a rebuild would
+    // report the new context's clock against the old one's and invent a fault.
+    this.heartbeat = { ctx: 0, wall: 0, tick: 0, device: '' };
     this.wireOutput();
     this.watchContextState(this.ctx, this.ctxSeq);
     this.probeNewContext(this.ctx, this.ctxSeq);
@@ -205,6 +223,7 @@ export class ContextKeeper {
   private bindGlobalListeners() {
     if (this.globalListenersBound) return;
     this.globalListenersBound = true;
+    this.startHeartbeat();
 
     // Coming back to the app is the moment before the user hits play. Note
     // that `visibilitychange` does NOT fire when another application merely
@@ -243,6 +262,40 @@ export class ContextKeeper {
         if (ctx && ctx.state !== 'closed' && !isRunning(ctx)) {
           ctx.resume().catch(() => {});
         }
+
+        // A context nobody can vouch for is replaced here, in the gesture,
+        // before the click that is about to ask it for sound.
+        //
+        // This is the failure the clock work did not touch. A recovery that
+        // fires on a visibility change builds its replacement with no user
+        // activation and, in the capture, with the window on its way back from
+        // being hidden — and WebKit hands back a context that reports
+        // 'running', keeps perfect time, carries the same device fingerprint
+        // as the one that was audible an hour earlier, and renders to nothing.
+        // Every instrument this engine has says that context is healthy: the
+        // state, the clock rate, the fingerprint, even the tap on the output,
+        // which sits inside the graph and so measures signal that never
+        // reaches a speaker. Nothing will ever rebuild it again, because there
+        // is nothing left to detect.
+        //
+        // So the test is not a measurement, it is provenance. Of the four
+        // contexts in that capture, the one born inside a click was the one
+        // never in doubt; the three born on a visibility change were not, and
+        // the two that could not even prove their clocks were the silent ones.
+        // Unproven and not gesture-born is the whole condition, and it clears
+        // itself: the replacement is built in a gesture, so it cannot requeue.
+        if (ctx && !this.bornInGesture && !this.proven) {
+          alog('ctx:unproven-regenerating', { ctx: this.ctxSeq, ctxState: ctx.state });
+          // Both calls start synchronously inside the gesture: rebuildContext
+          // nulls the context before its first await, and getCtxAsync reaches
+          // `new AudioContext` in the same turn. Awaiting either would land the
+          // construction after the gesture has expired, which is the one thing
+          // this must not do.
+          void this.rebuildContext(false);
+          void this.getCtxAsync().catch(() => {});
+          return;
+        }
+
         if (this.backgroundSinceLastCheck) {
           // The device check runs here too, and synchronously, because
           // `recoverOutput` cannot answer in time. It probes the clock for
@@ -289,6 +342,54 @@ export class ContextKeeper {
     }
   }
 
+  /**
+   * Sample the output on a timer, and say so only when something moves.
+   *
+   * This is the one observer that does not wait to be asked. It exists
+   * because the failures in this engine are not witnessed, they are inferred
+   * hours later from a context already in ruins, and an inference is how four
+   * releases of recovery code could look like they were working.
+   *
+   * It observes and deliberately does **not** act. Recovering from a timer
+   * while the window is hidden is exactly what produced the contexts that
+   * reported a perfect clock, an unchanged fingerprint and a healthy tap
+   * while rendering to nothing. Taking a decision nobody is present to verify
+   * is what got us here; the heartbeat's whole job is to stamp the moment so
+   * the next decision can be made on evidence.
+   */
+  private startHeartbeat(): void {
+    window.setInterval(() => {
+      const ctx = this.ctx;
+      if (!ctx || ctx.state === 'closed') return;
+      const now = performance.now();
+      const prev = this.heartbeat;
+      const device = this.witness.fingerprintOf(ctx);
+      const tick = prev.tick + 1;
+      this.heartbeat = { ctx: ctx.currentTime, wall: now, tick, device };
+      // The first sample after a rebuild only establishes the baseline.
+      if (prev.wall === 0) return;
+      const wallSec = (now - prev.wall) / 1000;
+      if (wallSec <= 0) return;
+      const rate = (ctx.currentTime - prev.ctx) / wallSec;
+      const deviceMoved = prev.device !== '' && device !== prev.device;
+      const offRate = rate < CLOCK_RATE_MIN || rate > CLOCK_RATE_MAX;
+      // Silence while healthy, so an idle afternoon costs the ring almost
+      // nothing and the lines that are there all mean something.
+      if (!offRate && !deviceMoved && isRunning(ctx) && tick % HEARTBEAT_REPORT_EVERY !== 0) {
+        return;
+      }
+      alog('ctx:heartbeat', {
+        rate: Number(rate.toFixed(3)),
+        wallMs: Math.round(wallSec * 1000),
+        ctxState: ctx.state,
+        device,
+        wasDevice: deviceMoved ? prev.device : undefined,
+        hidden: document.hidden,
+        outLatMs: Number((ctx.outputLatency * 1000).toFixed(2)),
+      });
+    }, HEARTBEAT_MS);
+  }
+
   /** What the output looked like at this instant, for the log ring. */
   private contextVitals(): Record<string, unknown> {
     const ctx = this.ctx;
@@ -312,12 +413,22 @@ export class ContextKeeper {
    */
   private probeNewContext(ctx: AudioContext, id: number) {
     const born = ctx.currentTime;
+    const bornAt = performance.now();
     [0, 100, 500].forEach((delay) => {
       window.setTimeout(() => {
         if (this.ctx !== ctx) return;
+        // `wallMs` is here because three reads once arrived in the same tick.
+        // A context built while the window was hidden had its timers throttled
+        // and flushed together, so all three probes logged the identical
+        // ctxTime at the identical millisecond — and the log read as if the
+        // clock had been watched for half a second when it had not been
+        // watched at all. Without the elapsed time beside it there is no way
+        // to tell that apart from a genuinely frozen clock.
+        const wallMs = Math.round(performance.now() - bornAt);
         alog('ctx:probe', {
           ctx: id,
           at: delay,
+          wallMs,
           ctxState: ctx.state,
           ctxTime: Number(ctx.currentTime.toFixed(4)),
         });
@@ -327,24 +438,58 @@ export class ContextKeeper {
         // something — ninety-one seconds of `verdict: unknown` in the first
         // capture, every one of them blind to a second device change. A clock
         // that has moved since construction is the same proof a start gives.
-        if (delay === 500 && isRunning(ctx) && ctx.currentTime > born) {
-          this.witness.confirm(ctx);
+        //
+        // And it must have kept time, not merely moved. The fingerprint is the
+        // baseline every later device comparison is measured against, so
+        // taking it from a context whose clock was never really observed sets
+        // the reference from a device that may never have rendered a frame.
+        if (delay === 500 && isRunning(ctx) && wallMs >= CLOCK_PROBE_MS) {
+          const rate = (ctx.currentTime - born) / (wallMs / 1000);
+          if (rate >= CLOCK_RATE_MIN && rate <= CLOCK_RATE_MAX) {
+            this.proven = true;
+            this.witness.confirm(ctx);
+          } else {
+            alog('ctx:probe-rate-rejected', { ctx: id, rate: Number(rate.toFixed(3)), wallMs });
+          }
         }
       }, delay);
     });
   }
 
   /**
-   * True while the context's clock is actually advancing.
+   * True while the context's clock is keeping real time.
    *
    * A context can sit in 'running' and still be dead: once another application
    * takes the output device, the clock stops, `start()` reports success and
    * nothing is heard. The state cannot tell those apart — the clock can.
+   *
+   * It can also sit in 'running' with a clock that has come loose from wall
+   * time altogether, which is the failure this now catches. After the default
+   * output changed underneath a hidden window, a context ran all night at
+   * 1.3% of real time and paid the difference back in bursts — hundreds of
+   * seconds inside one 120ms probe. The old test asked only whether the clock
+   * had moved, so every burst read as perfect health and the recovery that
+   * would have replaced the context was skipped on every single refocus.
+   *
+   * Measuring the rate also makes the probe immune to a throttled timer: if
+   * the wait runs long, both halves of the ratio grow together.
    */
   private async isClockAdvancing(ctx: AudioContext): Promise<boolean> {
-    const before = ctx.currentTime;
+    const ctxBefore = ctx.currentTime;
+    const wallBefore = performance.now();
     await new Promise((resolve) => setTimeout(resolve, CLOCK_PROBE_MS));
-    return ctx.currentTime > before;
+    const wallSec = (performance.now() - wallBefore) / 1000;
+    // No measurable window means no measurement. Do not condemn a context on
+    // the strength of a division by zero.
+    if (wallSec <= 0) return true;
+    const rate = (ctx.currentTime - ctxBefore) / wallSec;
+    if (rate >= CLOCK_RATE_MIN && rate <= CLOCK_RATE_MAX) return true;
+    alog('ctx:clock-rate', {
+      rate: Number(rate.toFixed(3)),
+      ctxMoved: Number((ctx.currentTime - ctxBefore).toFixed(4)),
+      wallMs: Math.round(wallSec * 1000),
+    });
+    return false;
   }
 
   /**
@@ -652,23 +797,6 @@ export class ContextKeeper {
       // WebKit promise inside the recovery guard.
       void old.close().catch(() => {});
     }
-  }
-
-  /**
-   * Throw the context away and build a fresh one, ignoring every guard.
-   *
-   * This is the button that used to be "quit Stack and open it again". It
-   * deliberately does not go through `recoverOutput`: the whole point is to
-   * be usable when that is wedged.
-   */
-  async restart(): Promise<void> {
-    alog('engine:manual-restart');
-    this.recovering = null;
-    this.healing = null;
-    this.ctxInit = null;
-    await this.rebuildContext(false);
-    await this.getCtxAsync().catch(() => {});
-    this.hooks.onRestored();
   }
 
   /** Is a repair in flight? */

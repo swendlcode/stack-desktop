@@ -1,4 +1,15 @@
 {
+  "1.0.32": {
+    "date": "2026-11-26",
+    "title": "Sound that stays",
+    "summary": "Playback is rebuilt from the ground up, so sound no longer fades away after a long session and samples start the moment you click.",
+    "highlights": [
+      "Sound no longer disappears after Stack has been sitting open for a few hours.",
+      "Samples start the instant you click, including ones you have never played before.",
+      "Previews follow your output device the moment you change it.",
+      "MIDI previews and the sample editor run on the same new engine \u2014 and exporting an edit to your DAW is quicker."
+    ]
+  },
   "1.0.31": {
     "date": "2026-11-25",
     "title": "No lost click",

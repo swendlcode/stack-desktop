@@ -4,7 +4,7 @@ use parking_lot::RwLock;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::core::{FileWatcher, Indexer, WatchEvent};
+use crate::core::{FileWatcher, Indexer, Player, WatchEvent};
 use crate::db::{AssetRepository, DatabasePool, PackRepository, StackRepository};
 use crate::error::Result;
 use crate::models::Settings;
@@ -18,6 +18,8 @@ pub struct AppState {
     pub watcher: Arc<FileWatcher>,
     pub settings: Arc<RwLock<Settings>>,
     pub settings_path: std::path::PathBuf,
+    /// Sample playback. Owns the output device directly; see core::playback.
+    pub player: Arc<Player>,
 }
 
 impl AppState {
@@ -124,6 +126,56 @@ impl AppState {
             }
         }
 
+        // The output device, opened on its own thread and held for the life
+        // of the process. Building it here rather than lazily means a device
+        // problem is visible at launch instead of on the first click.
+        let player = Player::new();
+
+        // The playhead, pushed rather than polled. Ten a second is enough for
+        // the frontend to interpolate smoothly between, and small enough that
+        // an idle app sends nothing at all: position events stop the moment
+        // playback does, and the only other traffic is one line per sample
+        // that reaches its end.
+        {
+            let player = player.clone();
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut ticker =
+                    tokio::time::interval(std::time::Duration::from_millis(100));
+                let mut last_ended = 0u64;
+                let mut was_playing = false;
+                loop {
+                    ticker.tick().await;
+                    let state = player.state();
+                    if state.ended_generation != last_ended {
+                        last_ended = state.ended_generation;
+                        let _ = app_handle.emit(
+                            "stack://audio-ended",
+                            serde_json::json!({
+                                "generation": last_ended,
+                                "editor": state.editor_owns,
+                            }),
+                        );
+                    }
+                    // One final frame on the transition to stopped, so the
+                    // playhead lands where the audio actually stopped rather
+                    // than wherever the last tick happened to catch it.
+                    if state.playing || was_playing {
+                        let _ = app_handle.emit(
+                            "stack://audio-position",
+                            serde_json::json!({
+                                "positionSec": state.position_sec,
+                                "durationSec": state.duration_sec,
+                                "playing": state.playing,
+                                "editor": state.editor_owns,
+                            }),
+                        );
+                    }
+                    was_playing = state.playing;
+                }
+            });
+        }
+
         Ok(Self {
             db,
             asset_repo,
@@ -133,6 +185,7 @@ impl AppState {
             watcher,
             settings,
             settings_path,
+            player,
         })
     }
 

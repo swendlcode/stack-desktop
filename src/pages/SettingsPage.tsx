@@ -206,8 +206,8 @@ function FolderInfoRow({ folder, onRemove }: { folder: WatchedFolder; onRemove: 
 function AudioDiagnostics() {
   const [snap, setSnap] = useState(() => audioEngine.debugSnapshot());
   const [toneResult, setToneResult] = useState<string>('');
-  const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [cleared, setCleared] = useState(false);
   const [verbose, setVerbose] = useState<boolean>(() => {
     try { return localStorage.getItem('stack:audioDebug') === '1'; } catch { return false; }
   });
@@ -224,24 +224,6 @@ function AudioDiagnostics() {
     refresh();
   };
 
-  /**
-   * The way out of a wedged engine that does not involve quitting the app.
-   *
-   * Until this existed the only cure for "the sound is gone and stays gone"
-   * was a restart, which is both the worst possible answer during a session
-   * and the thing that destroys the evidence of what went wrong.
-   */
-  const restart = async () => {
-    setBusy(true);
-    setToneResult('');
-    try {
-      await audioEngine.restartEngine();
-    } finally {
-      setBusy(false);
-      refresh();
-    }
-  };
-
   const copyLog = async () => {
     try {
       await navigator.clipboard.writeText(audioEngine.recentLog());
@@ -252,6 +234,22 @@ function AudioDiagnostics() {
     }
   };
 
+  /**
+   * Start the record again from nothing.
+   *
+   * A log copied out of a session that has been open since yesterday is mostly
+   * the day before the fault, and the ring is capped — so by the time anything
+   * goes wrong the events that explain it have already been pushed out by
+   * ordinary browsing. Clearing, reproducing, then copying gives a log that is
+   * only the failure.
+   */
+  const clearLog = () => {
+    audioEngine.clearLog();
+    setCleared(true);
+    window.setTimeout(() => setCleared(false), 2000);
+    refresh();
+  };
+
   const toggleVerbose = (v: boolean) => {
     setVerbose(v);
     try {
@@ -260,7 +258,20 @@ function AudioDiagnostics() {
     } catch { /* ignore */ }
   };
 
-  const rows: Array<[string, string]> = [
+  // The backend engine owns the device directly, so most of the Web Audio
+  // vitals below have no counterpart: there is no context to be in a state,
+  // no gain node, no clock that could have stalled and no tap to peak. The
+  // device name is the one the host reports rather than a guess assembled
+  // from latency figures, which is the whole reason playback moved.
+  const rows: Array<[string, string]> = snap.backend
+    ? [
+        ['Engine', 'backend (Rust)'],
+        ['Output device', snap.outputDevice ?? 'none'],
+        ['Sample rate', snap.sampleRate ? `${snap.sampleRate} Hz` : '—'],
+        ['Volume', snap.volume.toFixed(2)],
+        ['Playing', snap.currentPath ? 'yes' : 'no'],
+      ]
+    : [
     ['Context', snap.ctxExists ? snap.ctxState : 'not created'],
     ['Sample rate', snap.sampleRate ? `${snap.sampleRate} Hz` : '—'],
     ['Output gain', snap.gainValue != null ? snap.gainValue.toFixed(2) : '—'],
@@ -278,12 +289,12 @@ function AudioDiagnostics() {
     ['Output level', snap.outputPeak == null ? '—' : snap.outputPeak.toFixed(4)],
     ['Output device', snap.outputDevice ?? 'not confirmed'],
     ['Recovering', snap.recovering ? 'yes' : 'no'],
-  ];
+      ];
 
   return (
     <SettingSection
       title="Audio diagnostics"
-      description="If previews go silent, Restart audio rebuilds the engine without closing Stack. Copy log carries the last few hundred audio events, including what happened before the silence."
+      description="Copy log carries the last few hundred audio events, including what happened before a silence. Clear log empties the record first, so a fault you are about to reproduce is all that is in it."
     >
       <div className="rounded-md border border-gray-700 bg-gray-800 p-4">
         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -295,12 +306,12 @@ function AudioDiagnostics() {
           ))}
         </div>
         <div className="mt-4 flex items-center gap-2">
-          <Button variant="primary" size="sm" onClick={runTone} disabled={busy}>Test tone</Button>
-          <Button variant="secondary" size="sm" onClick={restart} disabled={busy}>
-            {busy ? 'Restarting…' : 'Restart audio'}
-          </Button>
+          <Button variant="primary" size="sm" onClick={runTone}>Test tone</Button>
           <Button variant="secondary" size="sm" onClick={copyLog}>
             {copied ? 'Copied' : 'Copy log'}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={clearLog}>
+            {cleared ? 'Cleared' : 'Clear log'}
           </Button>
           <Button variant="secondary" size="sm" onClick={refresh}>Refresh</Button>
           {toneResult && <span className="mono text-xs text-gray-400">{toneResult}</span>}

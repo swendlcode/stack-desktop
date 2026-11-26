@@ -1,4 +1,8 @@
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+
+import { encodeWav } from './wavEncoder';
+import { isTauri } from '../lib/tauri-core';
+import { BackendEditor } from './audio/backendEditor';
 
 type Listener = () => void;
 
@@ -152,7 +156,7 @@ class EditorEngine {
    * preferences like waveform color live in `editorStore` and are not
    * touched here.
    */
-  resetEdits() {
+  async resetEdits() {
     this._rate = 1;
     this._volume = 1;
     this._highCutHz = 22050;
@@ -243,7 +247,7 @@ class EditorEngine {
     this.startedAtCtx = this.ctx.currentTime;
   }
 
-  pause() {
+  async pause() {
     if (!this._playing || !this.ctx) return;
     this._currentTime = this.positionNow();
     this.stopSource();
@@ -252,7 +256,7 @@ class EditorEngine {
     this.emit();
   }
 
-  stop() {
+  async stop() {
     this.stopSource();
     this._currentTime = 0;
     this._playing = false;
@@ -260,21 +264,21 @@ class EditorEngine {
     this.emit();
   }
 
-  seek(sec: number) {
+  async seek(sec: number) {
     const t = Math.max(0, Math.min(this._duration, sec));
     this._currentTime = t;
     if (this._playing) this.play(t);
     else this.emit();
   }
 
-  setVolume(v: number) {
+  async setVolume(v: number) {
     this._volume = v;
     if (this.gain) this.gain.gain.value = v;
     this.emit();
   }
   get volume() { return this._volume; }
 
-  setRate(r: number) {
+  async setRate(r: number) {
     this.rebaseClock();
     this._rate = r;
     if (this.source) this.source.playbackRate.value = this.effectiveRate();
@@ -283,7 +287,7 @@ class EditorEngine {
   get rate() { return this._rate; }
 
   /** Shift pitch by semitones (-24 to +24). Does not affect playback speed. */
-  setPitch(semitones: number) {
+  async setPitch(semitones: number) {
     this.rebaseClock();
     this._pitchSemitones = Math.max(-24, Math.min(24, semitones));
     if (this.source) this.source.playbackRate.value = this.effectiveRate();
@@ -295,7 +299,7 @@ class EditorEngine {
    * Reverses the audio buffer in-place (creates a new work buffer).
    * Calling again un-reverses it.
    */
-  reverse() {
+  async reverse() {
     const src = this.buffer;
     if (!src) return;
     const wasPlaying = this._playing;
@@ -344,7 +348,7 @@ class EditorEngine {
    * Applies on top of any existing reverse. Idempotent — calling again
    * re-normalizes (useful after other edits).
    */
-  normalize() {
+  async normalize() {
     const src = this._workBuffer ?? this.buffer;
     if (!src) return;
     const wasPlaying = this._playing;
@@ -384,7 +388,7 @@ class EditorEngine {
    * After deletion the playhead is placed at the splice point.
    * Loop is turned off since the region no longer exists.
    */
-  deleteRegion(startSec: number, endSec: number) {
+  async deleteRegion(startSec: number, endSec: number) {
     const src = this._workBuffer ?? this.buffer;
     if (!src) return;
     const sr = src.sampleRate;
@@ -428,21 +432,21 @@ class EditorEngine {
     if (wasPlaying) this.play(this._currentTime);
   }
 
-  setHighCut(hz: number) {
+  async setHighCut(hz: number) {
     this._highCutHz = hz;
     if (this.lowpass) this.lowpass.frequency.value = hz;
     this.emit();
   }
   get highCutHz() { return this._highCutHz; }
 
-  setLowCut(hz: number) {
+  async setLowCut(hz: number) {
     this._lowCutHz = hz;
     if (this.highpass) this.highpass.frequency.value = hz;
     this.emit();
   }
   get lowCutHz() { return this._lowCutHz; }
 
-  setLoop(on: boolean, start?: number, end?: number) {
+  async setLoop(on: boolean, start?: number, end?: number) {
     this._loopOn = on;
     if (start != null) this._loopStart = Math.max(0, start);
     if (end != null) this._loopEnd = Math.min(this._duration, end);
@@ -488,7 +492,7 @@ class EditorEngine {
     }
   }
 
-  unload() {
+  async unload() {
     this.stop();
     this.buffer = null;
     this._workBuffer = null;
@@ -537,6 +541,43 @@ class EditorEngine {
     src.start(0, startOffset, srcDur);
     return offline.startRendering();
   }
+  /**
+   * The working buffer downmixed to mono, for drawing.
+   *
+   * A method rather than a buffer getter because the backend editor holds no
+   * decoded audio in the webview at all — it fetches the downmix as bytes
+   * when the shape on screen needs to change.
+   */
+  async monoSamples(): Promise<Float32Array | null> {
+    const buf = this._workBuffer ?? this.buffer;
+    if (!buf) return null;
+    const channels = buf.numberOfChannels;
+    if (channels === 1) return buf.getChannelData(0).slice();
+    const out = new Float32Array(buf.length);
+    for (let c = 0; c < channels; c++) {
+      const data = buf.getChannelData(c);
+      for (let i = 0; i < data.length; i++) out[i] += data[i] / channels;
+    }
+    return out;
+  }
+
+  /** Render the edit to a WAV on disk and return its path. */
+  async exportEdit(filename: string): Promise<string | null> {
+    const rendered = await this.renderEdit();
+    if (!rendered) return null;
+    const bytes = encodeWav(rendered);
+    return invoke<string>('save_export', { filename, bytes: Array.from(bytes) });
+  }
 }
 
-export const editorEngine = new EditorEngine();
+/**
+ * One of two editors, chosen once — the same seam `audioEngine` uses.
+ *
+ * In the desktop app the audio, the edits and the export all happen in Rust.
+ * Browser mode keeps the Web Audio editor, because the library is served
+ * over the network there and the speakers attached to this process are not
+ * the ones the listener is sitting in front of.
+ */
+export const editorEngine: EditorEngine | BackendEditor = isTauri
+  ? new BackendEditor()
+  : new EditorEngine();

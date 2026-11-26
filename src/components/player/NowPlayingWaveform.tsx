@@ -20,7 +20,15 @@ export function NowPlayingWaveform({ assetId }: NowPlayingWaveformProps) {
   const progress = usePlayerStore((s) =>
     s.duration > 0 ? Math.min(1, Math.max(0, s.currentTime / s.duration)) : 0,
   );
-  const duration = usePlayerStore((s) => s.duration);
+  // `play()` resets the store's duration to 0 and it is only refilled once
+  // playback reports one, which the backend does over IPC a tick later rather
+  // than synchronously from a decoded buffer. For that window `onSeek` below
+  // went undefined and the waveform was not clickable at all. The indexer
+  // already knows how long the file is, so use that until playback says
+  // otherwise — the two agree, and one of them is available immediately.
+  const duration = usePlayerStore((s) =>
+    s.duration > 0 ? s.duration : (s.currentAsset?.durationMs ?? 0) / 1000,
+  );
   const seekTo = usePlayerStore((s) => s.seekTo);
 
   return (

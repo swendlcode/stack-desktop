@@ -475,6 +475,14 @@ export const AssetRow = memo(function AssetRow({
         // Let the row's own controls — play, favourite, checkbox, menu —
         // handle their own presses.
         if ((e.target as HTMLElement).closest('button,input,a,[role="slider"]')) return;
+        // The waveform owns where it was pressed, and has already started the
+        // sample from there. Auditioning from the top as well is the second
+        // sound in issue #15. Select the row and stop — the audition has
+        // happened, it just did not happen here.
+        if ((e.target as HTMLElement).closest('canvas[aria-label="Waveform"]')) {
+          onRowClick?.(index, e);
+          return;
+        }
         handleRowClick(e);
       }}
       onDoubleClick={() => {

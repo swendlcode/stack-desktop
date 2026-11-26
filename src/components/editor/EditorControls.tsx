@@ -1,6 +1,5 @@
 import { editorEngine } from "../../services/editorEngine";
 import { useEditorEngine } from "../../hooks/useEditorEngine";
-import { usePlayerStore } from "../../stores/playerStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { Knob } from "../ui/Knob";
 import { LevelMeter } from "./LevelMeter";
@@ -26,21 +25,25 @@ export function EditorControls({ assetBpm, onDragExport, dragging }: Props) {
   const zoom = useEditorStore((z) => z.zoom);
   const setZoom = useEditorStore((z) => z.setZoom);
   const resetView = useEditorStore((z) => z.resetView);
-  const isPlaying = usePlayerStore((state) => state.isPlaying);
-  const pause = usePlayerStore((state) => state.pause);
-  const resume = usePlayerStore((state) => state.resume);
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-gray-700/60 bg-gray-900 px-4 py-2.5">
       {/* ── Primary Playback Controls ── */}
       <div className="flex items-center gap-1">
         <IconButton
-          label={isPlaying ? "Pause" : "Play"}
-          active={isPlaying}
-          onClick={() => (isPlaying ? pause() : resume())}
+          // The editor's own state, not the browser's.
+          //
+          // These were the same thing while the editor had its own audio
+          // context and the store spoke for both. It owns its transport now,
+          // so reading `isPlaying` from the store showed Play over audible
+          // playback whenever the two drifted apart — which is any time the
+          // editor starts or ends on its own.
+          label={s.playing ? "Pause" : "Play"}
+          active={s.playing}
+          onClick={() => (s.playing ? editorEngine.pause() : editorEngine.play())}
           primary={true}
         >
-          {isPlaying ? (
+          {s.playing ? (
             <Stop size={16} color="currentColor" variant="Linear" />
           ) : (
             <Play size={16} color="currentColor" variant="Linear" />

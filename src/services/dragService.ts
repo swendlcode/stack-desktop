@@ -92,6 +92,18 @@ export const dragService = {
    * kicks off a native drag-out for that file — used by the sample editor to
    * hand the DAW the rendered result of the current edit.
    */
+  /**
+   * Drag a file the backend has already written.
+   *
+   * The byte-carrying version below exists for browser mode; in the desktop
+   * app the editor renders and writes the WAV in Rust, so there is nothing
+   * to ship across the boundary but the path.
+   */
+  async startExportDragPath(path: string): Promise<void> {
+    const icon = await getIcon().catch(() => '');
+    await startDrag({ item: [path], icon, mode: 'copy' });
+  },
+
   async startExportDrag(filename: string, bytes: Uint8Array): Promise<void> {
     const path = await invoke<string>('save_export', {
       filename,

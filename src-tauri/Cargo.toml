@@ -1,6 +1,6 @@
 [package]
 name = "stack"
-version = "1.0.31"
+version = "1.0.32"
 description = "Local sample library manager"
 authors = ["Stack"]
 edition = "2021"
@@ -46,6 +46,14 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 midly = "0.5"
 hound = "3.5"
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "aiff"] }
+
+# Playback. The output device is owned here rather than in the webview: a
+# WKWebView AudioContext can report `running`, keep perfect time and carry the
+# right device fingerprint while rendering to nothing, and no measurement
+# available inside the webview can tell that apart from health.
+cpal = "0.15"
+rubato = "0.15"
+crossbeam-channel = "0.5"
 
 regex = "1"
 flate2 = "1"

@@ -6,7 +6,6 @@ import { useEditorEngine } from "../../hooks/useEditorEngine";
 import { editorEngine } from "../../services/editorEngine";
 import { assetService } from "../../services/assetService";
 import { dragService } from "../../services/dragService";
-import { encodeWav } from "../../services/wavEncoder";
 import { usePlayerStore } from "../../stores/playerStore";
 import { EditorWaveform } from "./EditorWaveform";
 import { EditorControls } from "./EditorControls";
@@ -28,8 +27,9 @@ export function SampleEditor() {
 
   // Recompute displayed samples whenever the work buffer changes (reverse/normalize)
   const refreshSamples = useCallback(() => {
-    const buf = editorEngine.workBuffer;
-    if (buf) setSamples(downmixToMono(buf));
+    void editorEngine.monoSamples().then((mono) => {
+      if (mono) setSamples(mono);
+    });
   }, []);
 
   // Stop main playback + load sample into the editor engine when opened.
@@ -96,12 +96,13 @@ export function SampleEditor() {
         if (editorEngine.duration > 0) state.setDuration(editorEngine.duration);
         state.setCurrentTime(editorEngine.currentTime);
       }
-      if (
-        !editorEngine.playing &&
-        state.isPlaying &&
-        state.currentAsset?.id === asset.id
-      ) {
-        state.pause();
+      // Mirror the editor's transport into the store, both ways, so the
+      // player bar and the list row agree with what is actually sounding.
+      // The store no longer drives playback while the editor is open — it
+      // reports it.
+      if (state.currentAsset?.id === asset.id) {
+        if (!editorEngine.playing && state.isPlaying) state.pause();
+        else if (editorEngine.playing && !state.isPlaying) state.resume();
       }
     });
 
@@ -137,10 +138,13 @@ export function SampleEditor() {
         const { loopOn, loopStart, loopEnd } = editorEngine;
         if (!loopOn || loopEnd <= loopStart) return;
         e.preventDefault();
-        editorEngine.deleteRegion(loopStart, loopEnd);
-        // Refresh the waveform display from the new work buffer
-        const buf = editorEngine.workBuffer;
-        if (buf) setSamples(downmixToMono(buf));
+        // The splice happens in the backend, so the new shape has to be
+        // asked for once it is done rather than read straight back.
+        void editorEngine.deleteRegion(loopStart, loopEnd).then(() =>
+          editorEngine.monoSamples().then((mono) => {
+            if (mono) setSamples(mono);
+          }),
+        );
       }
     };
     window.addEventListener("keydown", onKey);
@@ -213,11 +217,10 @@ export function SampleEditor() {
           if (dragging) return;
           setDragging(true);
           try {
-            const rendered = await editorEngine.renderEdit();
-            if (!rendered) return;
-            const bytes = encodeWav(rendered);
             const base = asset.filename.replace(/\.[^.]+$/, "");
-            await dragService.startExportDrag(`${base} (edit).wav`, bytes);
+            const path = await editorEngine.exportEdit(`${base} (edit).wav`);
+            if (!path) return;
+            await dragService.startExportDragPath(path);
           } finally {
             setDragging(false);
           }
@@ -226,18 +229,4 @@ export function SampleEditor() {
       />
     </EditorDock>
   );
-}
-
-function downmixToMono(buf: AudioBuffer): Float32Array {
-  const ch = buf.numberOfChannels;
-  if (ch === 1) return buf.getChannelData(0).slice();
-  const out = new Float32Array(buf.length);
-  const channels: Float32Array[] = [];
-  for (let c = 0; c < ch; c++) channels.push(buf.getChannelData(c));
-  for (let i = 0; i < buf.length; i++) {
-    let s = 0;
-    for (let c = 0; c < ch; c++) s += channels[c][i];
-    out[i] = s / ch;
-  }
-  return out;
 }

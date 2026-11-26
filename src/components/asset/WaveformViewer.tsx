@@ -36,10 +36,24 @@ export function WaveformViewer({
   // a layout — which, multiplied by every row a fling passes, is the
   // difference between a smooth list and a stuttering one.
 
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!onSeek) return;
-    // Seeking is the whole gesture — don't let the row's click handler fire too.
-    e.stopPropagation();
+  /**
+   * Seek on PRESS, for the same reason the row auditions on press — and
+   * because doing it on release made one gesture into two sounds.
+   *
+   * The row around this canvas starts the sample from the top on
+   * `pointerdown`. Seeking here on `click` meant the press went up to the row
+   * and played from 0, and then the release played again from wherever the
+   * pointer was: issue #15, "sound plays once on click and again on release".
+   * The `stopPropagation` that used to sit here was on the click, which is far
+   * too late — by then the press had already bubbled and been acted on.
+   *
+   * Claiming the press instead fixes it and makes the waveform behave like
+   * every other control in the app. The row still gets its selection: the
+   * press is not stopped, and `AssetRow` recognises a press on a waveform and
+   * selects without auditioning.
+   */
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!onSeek || e.button !== 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const fraction = (e.clientX - rect.left) / rect.width;
     onSeek(Math.max(0, Math.min(1, fraction)));
@@ -53,7 +67,7 @@ export function WaveformViewer({
       <canvas
         ref={canvasRef}
         className={`absolute inset-0 h-full w-full ${onSeek ? 'cursor-pointer' : ''}`}
-        onClick={handleClick}
+        onPointerDown={handlePointerDown}
         aria-label="Waveform"
       />
     </div>

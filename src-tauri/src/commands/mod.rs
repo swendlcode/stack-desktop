@@ -2,6 +2,7 @@ pub mod asset_commands;
 pub mod drag_commands;
 pub mod library_commands;
 pub mod pack_commands;
+pub mod editor_commands;
 pub mod player_commands;
 pub mod plugin_commands;
 pub mod project_commands;

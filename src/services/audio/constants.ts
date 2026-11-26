@@ -22,11 +22,54 @@ export const CACHE_MAX_BYTES = 512 * 1024 * 1024;
 // and put the sound a row behind the list: eight `start:mismatch` in a row,
 // every one of them a sample the user could hear but was not looking at.
 export const PREFETCH_MAX_SECONDS = 30;
+// How many speculative decodes may be in flight at once.
+//
+// `prefetchAround` used to start every neighbour immediately: a radius of
+// three is seven whole-file reads fired in parallel, and every arrow press
+// fired another seven. Each one is a multi-megabyte fetch over the asset
+// protocol plus a decodeAudioData, so the sample the user actually pressed
+// was queued behind a crowd of samples nobody had asked for — competing for
+// the webview's connection pool and for the main thread at the exact moment
+// it needed both. That is the delay between pressing a sample and hearing
+// it, and it is why the app felt sluggish next to one that does no
+// speculative decoding at all.
+//
+// Two keeps the cache warming usefully ahead of the selection while leaving
+// the machine enough room to answer a press immediately. A decode the user
+// has actually asked for ignores this limit entirely.
+export const PREFETCH_CONCURRENCY = 2;
 // Extra output gain for sample preview playback so perceived loudness is higher.
 export const SAMPLE_GAIN_BOOST = 2;
 // How long to watch the context clock before calling it stalled. Long enough to
 // clear a render quantum at any sample rate, short enough to stay invisible.
 export const CLOCK_PROBE_MS = 120;
+// How far the clock may drift from wall time and still count as alive.
+//
+// "Did the clock move" is not the same question as "is the clock real", and
+// the difference is a whole night of silence. After the output device changed
+// while the window was hidden, a context sat in 'running' with a clock that
+// advanced 533 seconds across 11 hours of wall time and then caught up in
+// bursts: 973 seconds inside a single 121ms probe, 15,000 inside two seconds.
+// Every one of those bursts satisfied `currentTime > before`, so recovery was
+// skipped on every refocus and the context was never replaced. A clock running
+// at 1.3% of real time is as dead as one running at 0%; the only honest test
+// is the rate.
+// How often the output is sampled while nothing is happening.
+//
+// Every other instrument in the engine observes at a moment the user created:
+// a focus, a visibility change, a press. The degradation does not happen at
+// those moments. It happens somewhere in the hours between them, and by the
+// time a press goes looking, the cause is off the end of a 300-entry ring —
+// three separate captures in one day each showed a clock that had come loose
+// at some unknown point across an unknown number of hours. Thirty seconds is
+// frequent enough to stamp the event and cheap enough to leave running.
+export const HEARTBEAT_MS = 30_000;
+// A baseline line every tenth tick, so a quiet log is evidence of health
+// rather than evidence of nothing. Five minutes apart, which an eight-hour
+// session fits inside the ring with room to spare.
+export const HEARTBEAT_REPORT_EVERY = 10;
+export const CLOCK_RATE_MIN = 0.5;
+export const CLOCK_RATE_MAX = 2;
 // Starting a source this close to the end of the buffer is silence in practice.
 export const END_OF_BUFFER_EPSILON = 0.01;
 // How hard to try resuming before declaring a context wedged. WebKit un-

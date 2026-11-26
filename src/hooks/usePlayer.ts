@@ -473,7 +473,15 @@ export function usePlayer() {
     }
   };
 
+  // True while the backend is the one sounding the MIDI, so the stop and
+  // pause paths know which engine they are talking to.
+  const midiOnBackendRef = useRef(false);
+
   const stopMidiNodes = () => {
+    if (midiOnBackendRef.current) {
+      midiOnBackendRef.current = false;
+      audioEngine.stop();
+    }
     stopMidiTimers();
     // Disconnect master gain to silence all scheduled oscillators immediately
     if (midiMasterRef.current) {
@@ -491,6 +499,18 @@ export function usePlayer() {
   };
 
   const pauseMidi = () => {
+    if (midiOnBackendRef.current) {
+      // The backend reports an absolute playhead — the performance is
+      // rendered from the top and started partway in — so there is no
+      // elapsed-since-start arithmetic to do here.
+      midiOffsetRef.current = Math.min(
+        midiDurationRef.current,
+        audioEngine.getCurrentTime(),
+      );
+      stopMidiNodes();
+      setCurrentTime(midiOffsetRef.current);
+      return;
+    }
     const ctx = midiCtxRef.current;
     if (ctx && ctx.state === 'running') {
       const elapsed = Math.max(0, ctx.currentTime - midiStartedAtRef.current);
@@ -654,6 +674,14 @@ export function usePlayer() {
     gen: number
   ) => {
     stopMidiNodes();
+    if (audioEngine.playMidi(notes, durationSec, offsetSec)) {
+      // The backend owns the playhead and the end of the piece from here.
+      // The ticker and end timer below exist only because the Web Audio
+      // synth could not report either: it scheduled oscillators and then
+      // estimated when they would be done.
+      midiOnBackendRef.current = true;
+      return;
+    }
     const ok = await scheduleMidiNotes(notes, durationSec, offsetSec);
     if (!ok || generationRef.current !== gen) return;
 
@@ -825,11 +853,29 @@ export function usePlayer() {
       // from where it was and the engine unable to start.
       if (fallbackActiveRef.current && audioRef.current) {
         audioRef.current.currentTime = time;
-      } else if (usePlayerStore.getState().isPlaying && current) {
-        audioEngine.stop();
-        audioEngine
-          .playBufferAsync(current.path, time, stillWanted(current.id, generationRef.current))
-          .catch(() => {});
+      } else if (current) {
+        const { isPlaying, play: playFrom } = usePlayerStore.getState();
+        if (isPlaying) {
+          audioEngine.stop();
+          audioEngine
+            .playBufferAsync(current.path, time, stillWanted(current.id, generationRef.current))
+            .catch(() => {});
+        } else {
+          // Clicking a waveform is a request to hear from there, and it was
+          // only honoured while something was already playing. That was
+          // survivable for exactly as long as a finished sample could keep
+          // claiming to play: a stalled context never fires `onended`, so
+          // `isPlaying` stayed true for minutes and the branch above caught
+          // nearly everything. The backend reports the end precisely, so the
+          // flag is now false the moment the sample stops and every click on
+          // the player bar landed in silence.
+          //
+          // It is the rule the arrow keys already follow — seeking is an
+          // audition — and the start goes through the store so it uses the
+          // one path that owns offsets (`pendingStartAt` + `playSeq`) rather
+          // than racing it.
+          playFrom(current, time);
+        }
       }
     });
 
@@ -882,6 +928,16 @@ export function usePlayer() {
     // ── Sample ──────────────────────────────────────────────────────────
 
     if (currentAsset.type === 'sample') {
+      // The editor owns the output while it is open.
+      //
+      // Its transport runs through the same store as the browser's, so
+      // pressing play in the editor used to start this effect as well — and
+      // the two now share one mixer rather than two Web Audio contexts, so
+      // whichever command landed last silenced the other. That is the
+      // editor's play button doing nothing: it started the editor's voice
+      // and then a `Cmd::Stop` from here cleared it.
+      if (useUiStore.getState().editorAssetId) return;
+
       // Stop MIDI if we're switching to a sample
       stopMidiNodes();
       midiOffsetRef.current = 0;
