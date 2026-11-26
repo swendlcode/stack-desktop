@@ -565,6 +565,9 @@ class AudioEngine {
     return false;
   }
 
+  /** This engine can hand a sample it cannot start to the HTML element. */
+  readonly elementFallback = true;
+
   isBufferCached(path: string): boolean {
     return this.buffers.has(path);
   }

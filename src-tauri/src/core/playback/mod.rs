@@ -138,13 +138,23 @@ impl Player {
             // buffer, because the callback copies frames rather than
             // converting them.
             cache.retune(rate);
+            if cache.is_undecodable(path) {
+                return Err(StackError::Other("file cannot be decoded".into()));
+            }
             if let Some(hit) = cache.get(path) {
                 return Ok(hit);
             }
         }
-        let samples = decode::decode(path, rate)?;
-        self.cache.lock().insert(path.clone(), samples.clone());
-        Ok(samples)
+        match decode::decode(path, rate) {
+            Ok(samples) => {
+                self.cache.lock().insert(path.clone(), samples.clone());
+                Ok(samples)
+            }
+            Err(err) => {
+                self.cache.lock().mark_undecodable(path.clone());
+                Err(err)
+            }
+        }
     }
 
     /// Start `path` at `offset_sec`. Blocking: call it off the UI thread.

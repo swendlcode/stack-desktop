@@ -50,6 +50,19 @@ export class BackendEngine {
   private mark = { position: 0, at: 0 };
   private device = { name: '', rate: 0, failed: false };
   private raf: number | null = null;
+  /** Paths the backend has already refused. */
+  private failed = new Set<string>();
+
+  /**
+   * No element fallback, deliberately.
+   *
+   * It was the Web Audio engine's safety net for a context that would not
+   * start. There is nothing here for it to rescue: symphonia decodes more
+   * formats than the WKWebView media loader, which cannot read an asset://
+   * URL at all. A file this engine refuses is one the element refuses a
+   * moment later, and its refusal hands the sample straight back here.
+   */
+  readonly elementFallback = false;
 
   constructor() {
     void this.bind();
@@ -162,6 +175,9 @@ export class BackendEngine {
       alog('backend:no-device', { path });
       return false;
     }
+    // Asked and answered. Without this a bad file costs a round trip, a
+    // full read and a probe on every press.
+    if (this.failed.has(path)) return false;
     this.noteRequest(path);
     this.path = path;
     this.playing = true;
@@ -176,8 +192,14 @@ export class BackendEngine {
       .catch((err) => {
         this.playing = false;
         this.stopTicking(0);
-        alog('backend:play-failed', { path, error: String(err) });
-        this.onStartFailed?.(path);
+        // Logged once per path, and `onStartFailed` is deliberately not
+        // called: that hook routes to the element, which refuses and hands
+        // the sample back here. Eighty round trips in two hundred
+        // milliseconds on one corrupt file, which is how this was found.
+        if (!this.failed.has(path)) {
+          this.failed.add(path);
+          alog('backend:play-failed', { path, error: String(err) });
+        }
       });
     return true;
   }

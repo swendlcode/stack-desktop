@@ -1,4 +1,12 @@
 {
+  "1.0.33": {
+    "date": "2026-11-26",
+    "title": "One bad file",
+    "summary": "A damaged sample no longer sends Stack into a spin when you click it.",
+    "highlights": [
+      "A file Stack cannot read is reported once and skipped, instead of being retried dozens of times a second."
+    ]
+  },
   "1.0.32": {
     "date": "2026-11-26",
     "title": "Sound that stays",

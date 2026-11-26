@@ -334,6 +334,9 @@ export function usePlayer() {
    * same pending-seek handling and the same honest `fallbackActiveRef`.
    */
   const startFallback = (path: string, offset: number) => {
+    // Every route to the element passes through here, which is why the
+    // guard lives here rather than at each of the six call sites.
+    if (!audioEngine.elementFallback) return;
     if (!audioRef.current) return;
     fallbackWantRef.current = { path, offset };
     primeFallback(path);
