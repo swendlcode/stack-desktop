@@ -291,6 +291,13 @@ export class BackendEditor {
   // retunes the voice in place rather than restarting it, so a drag changes
   // the sound without a gap.
 
+  /**
+   * Nothing to do: the mixer applies the player bar's volume to the editor's
+   * voice itself, alongside the browser's. Here so both editors present the
+   * same surface.
+   */
+  setMonitorVolume(_v: number): void {}
+
   async setVolume(v: number): Promise<void> {
     await this.call('editor_set', { settings: { volume: v } });
   }

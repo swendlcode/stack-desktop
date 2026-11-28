@@ -118,6 +118,12 @@ pub async fn audio_set_volume(volume: f32, state: State<'_, AppState>) -> Result
     state.player.set_volume(volume)
 }
 
+/// Repeat the sample instead of ending it. Survives changing sample.
+#[tauri::command]
+pub async fn audio_set_loop(enabled: bool, state: State<'_, AppState>) -> Result<()> {
+    state.player.set_loop(enabled)
+}
+
 /// The transport, the device and the cache, for the UI and for diagnostics.
 #[tauri::command]
 pub async fn audio_state(state: State<'_, AppState>) -> Result<PlaybackState> {

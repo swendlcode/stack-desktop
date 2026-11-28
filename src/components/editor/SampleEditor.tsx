@@ -45,6 +45,11 @@ export function SampleEditor() {
       .then((ok) => {
         if (!ok) return;
         editorEngine.resetEdits();
+        // Loop is the transport's setting, not the sample's: opening the
+        // next sound keeps looping if the player bar says so (issue #16).
+        // `resetEdits` has just set the loop to the whole file, so this
+        // repeats all of it until a region is dragged over the waveform.
+        if (usePlayerStore.getState().loopOn) void editorEngine.setLoop(true);
         refreshSamples();
         // Editor-open workflow: whenever sample selection changes (arrow/click in table),
         // auto-preview once in editor so navigation always has audible feedback.
@@ -62,6 +67,14 @@ export function SampleEditor() {
       editorEngine.unload();
     };
   }, [editorAssetId, asset, resetEditorStore, refreshSamples]);
+
+  // The player bar's volume is the editor's volume too. On the desktop the
+  // mixer already applies it to the editor's voice; this is what carries it
+  // in browser mode, where the editor has its own Web Audio graph.
+  const masterVolume = usePlayerStore((s) => s.volume);
+  useEffect(() => {
+    editorEngine.setMonitorVolume(masterVolume);
+  }, [masterVolume]);
 
   // Re-derive displayed samples whenever reverse/normalize changes the work buffer
   useEffect(() => {

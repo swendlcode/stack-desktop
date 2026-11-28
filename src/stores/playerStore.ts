@@ -1,12 +1,45 @@
 import { create } from 'zustand';
 import type { Asset } from '../types';
 
+/**
+ * Loop is remembered, because it describes how the user auditions rather
+ * than which sample they are on. Kept in localStorage for the same reason
+ * the interface scale is: it is a preference about this machine, and the
+ * backend has no business knowing it between runs.
+ */
+const LOOP_KEY = 'stack:loop';
+
+function storedLoop(): boolean {
+  try {
+    return localStorage.getItem(LOOP_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function rememberLoop(on: boolean): void {
+  try {
+    localStorage.setItem(LOOP_KEY, on ? '1' : '0');
+  } catch {
+    // A private window or blocked site data: the setting still works for
+    // this session, it just will not be here next time.
+  }
+}
+
 interface PlayerStore {
   currentAsset: Asset | null;
   /** The current page's asset list — kept in sync by AssetGrid */
   playlist: Asset[];
   isPlaying: boolean;
   volume: number;
+  /**
+   * Repeat the sample instead of ending it.
+   *
+   * It belongs to the transport rather than to a sample on purpose: moving
+   * to the next sound keeps looping (issue #16). The editor's loop button
+   * writes here too, so the two agree.
+   */
+  loopOn: boolean;
   currentTime: number;
   duration: number;
   bpmSync: number | null;
@@ -35,6 +68,7 @@ interface PlayerStore {
   playNext: () => void;
   playPrev: () => void;
   setVolume: (volume: number) => void;
+  setLoop: (on: boolean) => void;
   setCurrentTime: (time: number) => void;
   setDuration: (duration: number) => void;
   setBpmSync: (bpm: number | null) => void;
@@ -51,6 +85,7 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   playlist: [],
   isPlaying: false,
   volume: 0.9,
+  loopOn: storedLoop(),
   currentTime: 0,
   duration: 0,
   bpmSync: null,
@@ -100,6 +135,10 @@ export const usePlayerStore = create<PlayerStore>((set, get) => ({
   },
 
   setVolume: (volume) => set({ volume }),
+  setLoop: (loopOn) => {
+    rememberLoop(loopOn);
+    set({ loopOn });
+  },
   setCurrentTime: (currentTime) => set({ currentTime }),
   setDuration: (duration) => set({ duration }),
   setBpmSync: (bpmSync) => set({ bpmSync }),

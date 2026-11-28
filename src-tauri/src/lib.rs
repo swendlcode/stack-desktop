@@ -235,15 +235,43 @@ fn update_navigate_checks<R: Runtime>(app: &tauri::AppHandle<R>, page: &str) {
     }
 }
 
+/// Start the log, and put it somewhere it can be read.
+///
+/// It is set up here rather than at the top of `run` because the app data
+/// directory is what the path resolver knows and the resolver needs a handle.
+/// Nothing of interest happens before this line: the audio device is not
+/// opened until the first play.
+fn init_tracing(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "stack_lib=info".into());
+
+    match app.path().app_data_dir() {
+        Ok(dir) => {
+            // Both: the file is the only copy an installed app keeps, and
+            // stdout is still where `npm run tauri dev` expects it.
+            let writer = crate::core::audio_log::Maker::new(&dir).and(std::io::stdout);
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_ansi(false)
+                .with_writer(writer)
+                .init();
+            tracing::info!(
+                "stack {} starting on {}",
+                app.package_info().version,
+                std::env::consts::OS
+            );
+        }
+        Err(_) => {
+            tracing_subscriber::fmt().with_env_filter(filter).init();
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "stack_lib=info".into()),
-        )
-        .init();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -263,6 +291,8 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            init_tracing(app.handle());
+
             let state = AppState::init(app.handle().clone())?;
 
             // Migration 010 adds `genre` and rebuilds the search index with
@@ -434,6 +464,7 @@ pub fn run() {
             commands::player_commands::audio_resume,
             commands::player_commands::audio_seek,
             commands::player_commands::audio_set_volume,
+            commands::player_commands::audio_set_loop,
             commands::player_commands::audio_state,
             commands::player_commands::audio_reopen_device,
             commands::player_commands::audio_test_tone,

@@ -15,7 +15,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
-import { PREFETCH_MAX_SECONDS, PREFETCH_RADIUS } from './constants';
+import {
+  LOG_DUMP_THROTTLE_MS,
+  NO_SOUND_MS,
+  PREFETCH_MAX_SECONDS,
+  PREFETCH_RADIUS,
+} from './constants';
 import { alog, clearLog as clearLogRing, formatLog, logLength } from './diagnostics';
 
 /** What `audio_state` returns. Mirrors `PlaybackState` in Rust. */
@@ -46,12 +51,35 @@ export class BackendEngine {
   private playing = false;
   private duration = 0;
   private volume = 1;
+  /**
+   * Repeat the sample instead of ending it. Held here only so the playhead
+   * can wrap between reports — the mixer in Rust owns the actual setting,
+   * which is why it survives moving to the next sample.
+   */
+  private looping = false;
   /** Last position the backend reported, and when it reported it. */
   private mark = { position: 0, at: 0 };
   private device = { name: '', rate: 0, failed: false };
   private raf: number | null = null;
   /** Paths the backend has already refused. */
   private failed = new Set<string>();
+
+  /**
+   * The silence watchdog, and the throttle on writing the ring out.
+   *
+   * This engine keeps the same event ring as the browser one and, until now,
+   * had no way of putting it anywhere. The web engine writes itself to disk
+   * when a start goes quiet; the backend engine logged thirteen kinds of
+   * event into memory and let the webview take them when the app closed. So
+   * the engine that owns the output device on every installed copy was the
+   * one that left no trace, which is why the Windows reports have nothing
+   * behind them.
+   */
+  private requestedPath: string | null = null;
+  private requestedAt = 0;
+  private answered = false;
+  private silenceTimer: number | null = null;
+  private lastDumpAt = 0;
 
   /**
    * No element fallback, deliberately.
@@ -120,6 +148,7 @@ export class BackendEngine {
       });
     } catch (err) {
       alog('backend:device-unavailable', { error: String(err) });
+      this.dumpLog('device unavailable');
     }
   }
 
@@ -151,7 +180,11 @@ export class BackendEngine {
     if (!this.playing) return this.mark.position;
     const elapsed = (performance.now() - this.mark.at) / 1000;
     const position = this.mark.position + elapsed;
-    return this.duration > 0 ? Math.min(position, this.duration) : position;
+    if (this.duration <= 0) return position;
+    // The backend's own position wraps; between its ten reports a second,
+    // this has to wrap with it or the playhead parks at the end of every
+    // pass and jumps back when the next report lands.
+    return this.looping ? position % this.duration : Math.min(position, this.duration);
   }
 
   getCurrentTime(): number {
@@ -173,6 +206,9 @@ export class BackendEngine {
   playBuffer(path: string, offsetSec = 0): boolean {
     if (this.device.failed) {
       alog('backend:no-device', { path });
+      // The whole of "I installed it and heard nothing" is this branch, and
+      // it has never been written down anywhere a user could send it.
+      this.dumpLog('no output device');
       return false;
     }
     // Asked and answered. Without this a bad file costs a round trip, a
@@ -199,6 +235,7 @@ export class BackendEngine {
         if (!this.failed.has(path)) {
           this.failed.add(path);
           alog('backend:play-failed', { path, error: String(err) });
+          this.dumpLog('play failed');
         }
       });
     return true;
@@ -233,6 +270,7 @@ export class BackendEngine {
         this.playing = false;
         this.stopTicking(0);
         alog('backend:midi-failed', { error: String(err) });
+        this.dumpLog('midi failed');
       });
     return true;
   }
@@ -279,6 +317,11 @@ export class BackendEngine {
   setVolume(v: number): void {
     this.volume = v;
     void invoke('audio_set_volume', { volume: v }).catch(() => {});
+  }
+
+  setLoop(on: boolean): void {
+    this.looping = on;
+    void invoke('audio_set_loop', { enabled: on }).catch(() => {});
   }
 
   // ─── Decoding ahead ────────────────────────────────────────────────────
@@ -378,11 +421,46 @@ export class BackendEngine {
   // ─── Diagnostics ───────────────────────────────────────────────────────
 
   noteRequest(path: string): void {
+    this.requestedPath = path;
+    this.requestedAt = performance.now();
+    this.answered = false;
     alog('start:queued', { path });
+    if (this.silenceTimer !== null) clearTimeout(this.silenceTimer);
+    // Silence is the one outcome that reports itself nowhere. Every other
+    // one ends in a `then` or a `catch`; a click that simply makes no sound
+    // reaches neither, so the report "nothing played" arrives with no
+    // evidence and cannot be answered. Give it some.
+    this.silenceTimer = window.setTimeout(() => {
+      this.silenceTimer = null;
+      if (this.answered || this.requestedPath !== path) return;
+      alog('start:silent', { path, ms: Math.round(performance.now() - this.requestedAt) });
+      this.dumpLog('no sound');
+    }, NO_SOUND_MS);
   }
 
   noteAudible(path: string, via: 'sync' | 'async' | 'element'): void {
-    alog('start:audible', { path, via });
+    if (this.requestedPath === path) this.answered = true;
+    const ms = this.requestedPath === path ? Math.round(performance.now() - this.requestedAt) : -1;
+    alog('start:audible', { path, via, ms });
+  }
+
+  /**
+   * Write the ring to `<app data>/audio-log.txt`, where Rust's own warnings
+   * now land too.
+   *
+   * Throttled, and deliberately automatic. Asking somebody to reproduce a
+   * fault and then find a log before they restart is asking them to debug the
+   * app instead of using it, and restarting is exactly what destroys the
+   * evidence.
+   */
+  private dumpLog(reason: string): void {
+    const now = performance.now();
+    if (now - this.lastDumpAt < LOG_DUMP_THROTTLE_MS) return;
+    this.lastDumpAt = now;
+    const text = `\n===== ${new Date().toISOString()} ${reason}\n${this.recentLog()}`;
+    void invoke('append_audio_log', { text }).catch(() => {
+      // The in-memory ring and Settings' Copy log still work.
+    });
   }
 
   note(event: string, data?: Record<string, unknown>): void {

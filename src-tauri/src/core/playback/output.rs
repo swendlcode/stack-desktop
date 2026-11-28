@@ -85,6 +85,12 @@ pub enum Cmd {
     Stop,
     Seek(usize),
     Volume(f32),
+    /// Repeat the browser's voice instead of ending it.
+    ///
+    /// It lives on the mixer rather than on the voice because it is a
+    /// setting, not a property of the sample: arrowing to the next sound
+    /// must keep looping, which is the whole point of the control.
+    Loop(bool),
 }
 
 /// What the audio thread tells everyone else, without anybody having to ask.
@@ -105,6 +111,14 @@ pub struct Shared {
     /// level meter; cleared by whoever reads it.
     pub peak_left: AtomicU32,
     pub peak_right: AtomicU32,
+    /// Master volume and loop, kept here rather than only on the mixer.
+    ///
+    /// A device change builds a fresh `Mixer`, and a fresh one used to come
+    /// up at full volume with the loop off: switching to headphones mid
+    /// session reset both silently. The replacement reads them back from
+    /// here instead.
+    pub volume: AtomicU32,
+    pub looping: AtomicBool,
     /// True while the editor's voice is the one sounding.
     ///
     /// The editor and the browser share one output and one playhead, so
@@ -116,6 +130,8 @@ pub struct Shared {
 impl Shared {
     pub fn new() -> Self {
         Self {
+            volume: AtomicU32::new(1.0f32.to_bits()),
+            looping: AtomicBool::new(false),
             playing: AtomicBool::new(false),
             frame: AtomicU64::new(0),
             ended: AtomicU64::new(0),
@@ -178,6 +194,7 @@ struct Mixer {
     /// The voice being replaced, finishing its ramp under the new one.
     closing: Option<Voice>,
     volume: f32,
+    looping: bool,
     paused: bool,
     out_channels: usize,
     rate: u32,
@@ -202,7 +219,10 @@ impl Mixer {
             editor: None,
             editor_params: EditorParams::default(),
             closing: None,
-            volume: 1.0,
+            // Whatever the last mixer was told, so a device change does not
+            // quietly undo the transport's settings.
+            volume: f32::from_bits(shared.volume.load(Ordering::Acquire)),
+            looping: shared.looping.load(Ordering::Acquire),
             paused: false,
             out_channels,
             rate,
@@ -290,7 +310,16 @@ impl Mixer {
                     self.shared.frame.store(voice.frame as u64, Ordering::Release);
                 }
             }
-            Cmd::Volume(v) => self.volume = v.clamp(0.0, 4.0),
+            Cmd::Volume(v) => {
+                self.volume = v.clamp(0.0, 4.0);
+                self.shared
+                    .volume
+                    .store(self.volume.to_bits(), Ordering::Release);
+            }
+            Cmd::Loop(on) => {
+                self.looping = on;
+                self.shared.looping.store(on, Ordering::Release);
+            }
             Cmd::EditorPlay {
                 samples,
                 start_frame,
@@ -351,7 +380,15 @@ impl Mixer {
 
         if !self.paused {
             if let Some(mut voice) = self.active.take() {
-                let done = mix(&mut voice, out, frames, channels, self.volume, self.fade_frames);
+                let done = mix(
+                    &mut voice,
+                    out,
+                    frames,
+                    channels,
+                    self.volume,
+                    self.fade_frames,
+                    self.looping,
+                );
                 if done {
                     self.shared
                         .ended
@@ -376,6 +413,7 @@ impl Mixer {
                     channels,
                     self.fade_frames,
                     self.rate,
+                    self.volume,
                     &self.shared,
                 );
                 if done {
@@ -390,7 +428,8 @@ impl Mixer {
         }
 
         if let Some(mut voice) = self.closing.take() {
-            let done = mix(&mut voice, out, frames, channels, self.volume, self.fade_frames);
+            // Never looped: this one is on its way out.
+            let done = mix(&mut voice, out, frames, channels, self.volume, self.fade_frames, false);
             if done {
                 self.recycle(voice.samples);
             } else {
@@ -422,6 +461,7 @@ impl Mixer {
 }
 
 /// Mix one voice into `out`. Returns true when the voice is finished.
+#[allow(clippy::too_many_arguments)]
 fn mix(
     voice: &mut Voice,
     out: &mut [f32],
@@ -429,17 +469,24 @@ fn mix(
     channels: usize,
     volume: f32,
     fade_frames: usize,
+    looping: bool,
 ) -> bool {
     let total = voice.samples.frames();
     let src_channels = voice.samples.channels;
-    if src_channels == 0 {
+    if src_channels == 0 || total == 0 {
         return true;
     }
     let fade = fade_frames.max(1) as f32;
 
     for f in 0..frames {
         if voice.frame >= total {
-            return true;
+            // The wrap happens inside the block, so a loop costs no gap and
+            // no second command — the next frame of the buffer is simply the
+            // first one again. A voice being replaced still ends.
+            if !looping || voice.closing.is_some() {
+                return true;
+            }
+            voice.frame = 0;
         }
         // A stop ramp overrides the start ramp: the voice is on its way out.
         let gain = match voice.closing.as_mut() {
@@ -504,6 +551,7 @@ fn mix_editor(
     channels: usize,
     fade_frames: usize,
     rate: u32,
+    master: f32,
     shared: &Shared,
 ) -> bool {
     let total = voice.samples.frames();
@@ -555,7 +603,11 @@ fn mix_editor(
                 voice.age += 1;
                 ramp
             }
-        } * params.volume;
+        } * params.volume
+            // The player bar's volume is the one volume. The editor used to
+            // read only its own gain, so turning the main control while a
+            // loop was sounding did nothing at all (issue #16).
+            * master;
 
         // Filtered once per source channel, then distributed. Running the
         // filter per *output* channel would process a mono source twice per
@@ -815,6 +867,78 @@ mod tests {
         drive(&mut mixer, 20);
         let left = f32::from_bits(shared.peak_left.load(Ordering::Acquire));
         assert!(left > 0.1, "meter read {left}");
+    }
+
+    /// Loop is a setting on the mixer, so a sample shorter than one
+    /// callback keeps sounding instead of ending inside the first block.
+    #[test]
+    fn a_looping_voice_never_ends() {
+        let rate = 48_000;
+        let (cmd, mut mixer, shared, _gc) = rig(rate);
+        cmd.send(Cmd::Loop(true)).unwrap();
+        cmd.send(Cmd::Play {
+            samples: tone(100, rate),
+            start_frame: 0,
+            generation: 7,
+        })
+        .unwrap();
+        let peak = drive(&mut mixer, 20);
+        assert!(peak > 0.1, "looping voice went quiet, peak {peak}");
+        assert!(shared.playing.load(Ordering::Acquire));
+        assert_eq!(shared.ended.load(Ordering::Acquire), 0, "reported an end");
+    }
+
+    /// The same voice ends when the setting is off — the test above would
+    /// pass on a mixer that simply never finished anything.
+    #[test]
+    fn a_short_voice_ends_without_the_loop() {
+        let rate = 48_000;
+        let (cmd, mut mixer, shared, _gc) = rig(rate);
+        cmd.send(Cmd::Play {
+            samples: tone(100, rate),
+            start_frame: 0,
+            generation: 7,
+        })
+        .unwrap();
+        drive(&mut mixer, 20);
+        assert!(!shared.playing.load(Ordering::Acquire));
+        assert_eq!(shared.ended.load(Ordering::Acquire), 7);
+    }
+
+    /// A device change builds a new mixer, which must not quietly undo the
+    /// volume and the loop the user set on the old one.
+    #[test]
+    fn a_replacement_mixer_keeps_the_transport_settings() {
+        let rate = 48_000;
+        let (cmd, mut mixer, shared, _gc) = rig(rate);
+        cmd.send(Cmd::Volume(0.25)).unwrap();
+        cmd.send(Cmd::Loop(true)).unwrap();
+        drive(&mut mixer, 1);
+
+        // What a device change does: the same `Shared`, everything else new.
+        let (_cmd2, cmd_rx) = bounded::<Cmd>(16);
+        let (gc_tx, _gc_rx) = bounded::<Arc<Samples>>(16);
+        let replacement = Mixer::new(shared, cmd_rx, gc_tx, 2, rate);
+        assert!((replacement.volume - 0.25).abs() < 1e-6);
+        assert!(replacement.looping);
+    }
+
+    /// The player bar's volume is the one volume: it has to reach the
+    /// editor's voice as well as the browser's.
+    #[test]
+    fn the_master_volume_reaches_the_editor_voice() {
+        let rate = 48_000;
+        let (cmd, mut mixer, _shared, _gc) = rig(rate);
+        cmd.send(Cmd::Volume(0.0)).unwrap();
+        cmd.send(Cmd::EditorPlay {
+            samples: tone(rate as usize, rate),
+            start_frame: 0,
+            params: EditorParams::default(),
+            generation: 1,
+        })
+        .unwrap();
+        let peak = drive(&mut mixer, 20);
+        assert!(peak < 1e-6, "muted editor still sounding, peak {peak}");
     }
 
     /// A stop must silence the editor, not just the sample voice.

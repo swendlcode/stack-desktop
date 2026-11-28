@@ -70,6 +70,14 @@ class AudioEngine {
   // output context — see audio/bufferCache.ts.
   private buffers = new BufferCache();
   private volume = 0.8;
+  /**
+   * Repeat the sample instead of ending it.
+   *
+   * `AudioBufferSourceNode.loop` does the work, which also means `onended`
+   * never fires while it is on — so nothing upstream has to suppress the
+   * end-of-track handling.
+   */
+  private looping = false;
   // The output context and its life support — see audio/contextKeeper.ts.
   // Everything it needs from here is passed in, so it can be reasoned about
   // (and repaired) without knowing anything about playback.
@@ -211,6 +219,7 @@ class AudioEngine {
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
+    source.loop = this.looping;
     source.connect(this.keeper.gain!);
 
     this.startedAt = ctx.currentTime;
@@ -231,7 +240,13 @@ class AudioEngine {
       const ctx = this.keeper.getCtxSync();
       if (!ctx || !this.currentSource) return;
       const elapsed = ctx.currentTime - this.startedAt;
-      const current = Math.min(buffer.duration, this.startOffset + elapsed);
+      const played = this.startOffset + elapsed;
+      // A looping source runs past the end of the buffer, so the playhead
+      // has to wrap with it rather than sticking at the right-hand edge.
+      const current =
+        this.looping && buffer.duration > 0
+          ? played % buffer.duration
+          : Math.min(buffer.duration, played);
       this.onTimeUpdate?.(current);
     }, 50);
 
@@ -308,6 +323,7 @@ class AudioEngine {
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
+    source.loop = this.looping;
     source.connect(this.keeper.gain!);
 
     this.startedAt = ctx.currentTime;
@@ -331,7 +347,13 @@ class AudioEngine {
       const ctx = this.keeper.getCtxSync();
       if (!ctx || !this.currentSource) return;
       const elapsed = ctx.currentTime - this.startedAt;
-      const current = Math.min(buffer.duration, this.startOffset + elapsed);
+      const played = this.startOffset + elapsed;
+      // A looping source runs past the end of the buffer, so the playhead
+      // has to wrap with it rather than sticking at the right-hand edge.
+      const current =
+        this.looping && buffer.duration > 0
+          ? played % buffer.duration
+          : Math.min(buffer.duration, played);
       this.onTimeUpdate?.(current);
     }, 50);
 
@@ -364,6 +386,14 @@ class AudioEngine {
   setVolume(v: number) {
     this.volume = v;
     if (this.keeper.gain) this.keeper.gain.gain.value = v * SAMPLE_GAIN_BOOST;
+  }
+
+  /** Repeat what is playing, and everything started after it. */
+  setLoop(on: boolean) {
+    this.looping = on;
+    // Takes effect on the sounding source too, so the toggle is audible
+    // without restarting what the user is listening to.
+    if (this.currentSource) this.currentSource.loop = on;
   }
 
   getCurrentTime(): number {

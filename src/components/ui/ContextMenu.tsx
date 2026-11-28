@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface ContextMenuItem {
@@ -13,9 +13,20 @@ interface ContextMenuProps {
   y: number;
   items: ContextMenuItem[];
   onClose: () => void;
+  /**
+   * The control that opened this menu, when a left click opened it.
+   *
+   * A press anywhere outside the menu closes it, and the button that opened
+   * it is outside the menu — so the second click on a toggle closed the menu
+   * on `mousedown` and its own `click` handler opened it again a moment
+   * later. The menu looked stuck open. Pressing the trigger is left alone
+   * here so that handler can decide, which is the only place that knows
+   * whether this is a toggle.
+   */
+  trigger?: RefObject<HTMLElement | null>;
 }
 
-export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
+export function ContextMenu({ x, y, items, onClose, trigger }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   // Clamped position — calculated after mount so we know the menu dimensions
   const [pos, setPos] = useState({ left: x, top: y });
@@ -35,7 +46,9 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (trigger?.current?.contains(target)) return;
+      if (ref.current && !ref.current.contains(target)) {
         onClose();
       }
     };
@@ -49,7 +62,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       window.removeEventListener('mousedown', onDown, true);
       window.removeEventListener('keydown', onKey, true);
     };
-  }, [onClose]);
+  }, [onClose, trigger]);
 
   const menu = (
     <div

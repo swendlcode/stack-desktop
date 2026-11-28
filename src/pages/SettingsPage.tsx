@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { appDataDir, join } from '@tauri-apps/api/path';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { isTauri } from '../lib/tauri-core';
 import { versionLabel } from '../utils/appBuild';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { libraryService } from '../services/libraryService';
@@ -224,6 +227,22 @@ function AudioDiagnostics() {
     refresh();
   };
 
+  /**
+   * Put the file in front of the person who has to send it.
+   *
+   * Copy log takes the webview's ring. The file has that *and* the backend's
+   * own warnings, which are the only record of a device that never opened —
+   * and a file nobody can find is the same as no file. This is the whole
+   * answer to "it makes no sound and I do not know what to tell you".
+   */
+  const showLogFile = async () => {
+    try {
+      await revealItemInDir(await join(await appDataDir(), 'audio-log.txt'));
+    } catch {
+      /* browser mode, or nothing has been written yet */
+    }
+  };
+
   const copyLog = async () => {
     try {
       await navigator.clipboard.writeText(audioEngine.recentLog());
@@ -294,7 +313,7 @@ function AudioDiagnostics() {
   return (
     <SettingSection
       title="Audio diagnostics"
-      description="Copy log carries the last few hundred audio events, including what happened before a silence. Clear log empties the record first, so a fault you are about to reproduce is all that is in it."
+      description="Copy log carries the last few hundred audio events, including what happened before a silence. Clear log empties the record first, so a fault you are about to reproduce is all that is in it. Show log file opens the record Stack writes itself, which also holds what the audio device reported."
     >
       <div className="rounded-md border border-gray-700 bg-gray-800 p-4">
         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -313,6 +332,9 @@ function AudioDiagnostics() {
           <Button variant="secondary" size="sm" onClick={clearLog}>
             {cleared ? 'Cleared' : 'Clear log'}
           </Button>
+          {isTauri && (
+            <Button variant="secondary" size="sm" onClick={showLogFile}>Show log file</Button>
+          )}
           <Button variant="secondary" size="sm" onClick={refresh}>Refresh</Button>
           {toneResult && <span className="mono text-xs text-gray-400">{toneResult}</span>}
         </div>

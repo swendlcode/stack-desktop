@@ -31,6 +31,14 @@ class EditorEngine {
   private _duration = 0;
 
   private _volume = 1;
+  /**
+   * The player bar's volume, applied to monitoring only.
+   *
+   * Deliberately separate from `_volume`: that one is baked into an export,
+   * and how loud you are listening has no business ending up in the file.
+   * The desktop build does the same thing one layer down, in the mixer.
+   */
+  private _monitor = 1;
   private _rate = 1;
   private _loopOn = false;
   private _loopStart = 0;
@@ -66,7 +74,7 @@ class EditorEngine {
       (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     this.ctx = new Ctor();
     this.gain = this.ctx.createGain();
-    this.gain.gain.value = this._volume;
+    this.gain.gain.value = this._volume * this._monitor;
     this.highpass = this.ctx.createBiquadFilter();
     this.highpass.type = 'highpass';
     this.highpass.frequency.value = this._lowCutHz;
@@ -173,7 +181,7 @@ class EditorEngine {
       this.source.loopStart = 0;
       this.source.loopEnd = this._duration;
     }
-    if (this.gain) this.gain.gain.value = 1;
+    if (this.gain) this.gain.gain.value = this._monitor;
     if (this.lowpass) this.lowpass.frequency.value = 22050;
     if (this.highpass) this.highpass.frequency.value = 20;
     this.emit();
@@ -273,10 +281,16 @@ class EditorEngine {
 
   async setVolume(v: number) {
     this._volume = v;
-    if (this.gain) this.gain.gain.value = v;
+    if (this.gain) this.gain.gain.value = v * this._monitor;
     this.emit();
   }
   get volume() { return this._volume; }
+
+  /** Follow the player bar's volume, without touching what an export renders. */
+  setMonitorVolume(v: number) {
+    this._monitor = v;
+    if (this.gain) this.gain.gain.value = this._volume * v;
+  }
 
   async setRate(r: number) {
     this.rebaseClock();

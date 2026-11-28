@@ -1,4 +1,15 @@
 {
+  "1.0.34": {
+    "date": "2026-11-27",
+    "title": "Loop, gain and the log",
+    "summary": "Loop stays on as you move through your samples, the editor's gain and the main volume each do their own job again, and Stack now keeps a record of its own sound.",
+    "highlights": [
+      "Loop sits on the player bar and stays on when you move to the next sample.",
+      "The main volume reaches the sample editor; the editor's gain still sets the level that gets exported.",
+      "Volume and loop survive an output device change.",
+      "Stack writes its own audio log, so a machine that stays silent can say why."
+    ]
+  },
   "1.0.33": {
     "date": "2026-11-26",
     "title": "One bad file",

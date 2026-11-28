@@ -1,4 +1,5 @@
 pub mod artwork_cleanup;
+pub mod audio_log;
 pub mod genre_backfill;
 pub mod hasher;
 pub mod indexer;

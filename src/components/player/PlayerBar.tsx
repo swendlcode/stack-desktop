@@ -14,6 +14,8 @@ import {
   Copy,
   CopySuccess,
   Edit2,
+  Repeat,
+  RepeateOne,
 } from "../ui/icons";
 import { formatKey, formatBpm } from "../../utils/formatters";
 import { audioEngine } from "../../services/audioEngine";
@@ -46,6 +48,8 @@ export function PlayerBar() {
   const resume = usePlayerStore((s) => s.resume);
   const stop = usePlayerStore((s) => s.stop);
   const clearCurrent = usePlayerStore((s) => s.clearCurrent);
+  const loopOn = usePlayerStore((s) => s.loopOn);
+  const setLoop = usePlayerStore((s) => s.setLoop);
   const playlist = usePlayerStore((s) => s.playlist);
   const setPlaylist = usePlayerStore((s) => s.setPlaylist);
   const openEditor = useUiStore((s) => s.openEditor);
@@ -344,6 +348,29 @@ export function PlayerBar() {
             aria-label="Next"
           >
             <Next size={16} color="currentColor" variant="Linear" />
+          </button>
+
+          {/* Loop lives out here, not in the editor.
+              Auditioning a loop is browsing, not editing: having to open the
+              editor to hear a bar twice was the ask in issue #16. The setting
+              is the transport's, so it holds while you arrow through the
+              list. */}
+          <button
+            onClick={() => setLoop(!loopOn)}
+            className={`hidden h-8 w-8 items-center justify-center rounded transition-colors md:flex ${
+              loopOn
+                ? "bg-stack-fire/15 text-stack-fire"
+                : "text-gray-400 hover:text-stack-white"
+            }`}
+            aria-label={loopOn ? "Loop on" : "Loop off"}
+            aria-pressed={loopOn}
+            title={loopOn ? "Looping — click to play once" : "Loop the sample"}
+          >
+            {loopOn ? (
+              <RepeateOne size={16} color="currentColor" variant="Bulk" />
+            ) : (
+              <Repeat size={16} color="currentColor" variant="Linear" />
+            )}
           </button>
 
           <button

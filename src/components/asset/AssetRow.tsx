@@ -121,6 +121,9 @@ export const AssetRow = memo(function AssetRow({
   const hasAnySelection = useSelectionStore((s) => s.selectedIds.size > 0);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // The three-dot button, so the menu can leave a press on it alone and let
+  // the toggle below decide what that press means.
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   const isActivePlaying = isActive && isPlaying;
   const canPlay = asset.type !== "preset" && asset.type !== "project";
@@ -761,8 +764,14 @@ export const AssetRow = memo(function AssetRow({
         </button>
 
         <button
+          ref={menuButtonRef}
           onClick={(e) => {
             e.stopPropagation();
+            // A toggle: the second press on the same button closes it.
+            if (menu) {
+              setMenu(null);
+              return;
+            }
             const rect = (
               e.currentTarget as HTMLButtonElement
             ).getBoundingClientRect();
@@ -781,6 +790,7 @@ export const AssetRow = memo(function AssetRow({
           y={menu.y}
           items={menuItems}
           onClose={() => setMenu(null)}
+          trigger={menuButtonRef}
         />
       )}
     </div>

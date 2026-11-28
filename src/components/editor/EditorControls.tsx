@@ -1,4 +1,5 @@
 import { editorEngine } from "../../services/editorEngine";
+import { usePlayerStore } from "../../stores/playerStore";
 import { useEditorEngine } from "../../hooks/useEditorEngine";
 import { useEditorStore } from "../../stores/editorStore";
 import { Knob } from "../ui/Knob";
@@ -52,7 +53,16 @@ export function EditorControls({ assetBpm, onDragExport, dragging }: Props) {
         <IconButton
           label={s.loopOn ? "Loop on" : "Loop off"}
           active={s.loopOn}
-          onClick={() => editorEngine.setLoop(!s.loopOn)}
+          // One loop setting, two places to reach it. The player bar carries
+          // the same toggle, and writing it here is what makes the editor's
+          // loop survive opening the next sample (issue #16). A loop region
+          // dragged on the waveform is not this: that is a selection, and it
+          // only ever turns looping on for the sample it was drawn over.
+          onClick={() => {
+            const next = !s.loopOn;
+            usePlayerStore.getState().setLoop(next);
+            void editorEngine.setLoop(next);
+          }}
         >
           {s.loopOn ? (
             <RepeateOne size={16} color="currentColor" variant="Bulk" />
@@ -115,6 +125,14 @@ export function EditorControls({ assetBpm, onDragExport, dragging }: Props) {
         valueText={formatHz(s.lowCutHz)}
         onChange={(v) => editorEngine.setLowCut(knobToHz(v))}
       />
+      {/* Gain is the sample's, the player bar's volume is the master.
+          They are two different questions — how loud this edit should be,
+          and how loud you are listening — and only the second one is the
+          one that was broken: the editor's voice ignored the master, so
+          the big control did nothing while the editor played (issue #16).
+          It reaches the voice now, on top of this. The split also decides
+          what ends up in a file: this knob is rendered into a dragged-out
+          WAV, the master never is. */}
       <Knob
         label="Gain"
         value={dbToKnob(gainToDb(s.volume))}

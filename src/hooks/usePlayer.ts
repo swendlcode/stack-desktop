@@ -257,6 +257,7 @@ export function usePlayer() {
       return;
     }
     audio.volume = volumeRef.current;
+    audio.loop = loopRef.current;
     // Seeking before the element has metadata is ignored, so hold the offset
     // until `loadedmetadata` if it is not ready yet.
     if (audio.readyState > 0) {
@@ -400,6 +401,9 @@ export function usePlayer() {
   };
   // Last `stopSeq` acted on, so a stop can be told apart from a pause.
   const stopSeqRef = useRef(0);
+  // The live loop setting, for the element fallback, which is set up in
+  // callbacks rather than in render.
+  const loopRef = useRef(false);
   // Last `playSeq` acted on, so an explicit play request can be told apart
   // from the asset merely changing underneath. See the block in the sample
   // branch below for which of the two owns the start offset.
@@ -409,6 +413,7 @@ export function usePlayer() {
     currentAsset,
     isPlaying,
     volume,
+    loopOn,
     setCurrentTime,
     setDuration,
     pause,
@@ -462,6 +467,18 @@ export function usePlayer() {
     if (audioRef.current) audioRef.current.volume = volume;
     if (midiMasterRef.current) midiMasterRef.current.gain.value = volume;
   }, [volume]);
+
+  // ─── Loop sync ─────────────────────────────────────────────────────────
+
+  // Applied to whatever is already sounding as well as to everything
+  // started after it, so the toggle is heard without restarting the sample
+  // — and it is deliberately not reset anywhere, which is what makes it
+  // survive moving to the next sound (issue #16).
+  useEffect(() => {
+    loopRef.current = loopOn;
+    audioEngine.setLoop(loopOn);
+    if (audioRef.current) audioRef.current.loop = loopOn;
+  }, [loopOn]);
 
   // ─── MIDI helpers ──────────────────────────────────────────────────────
 

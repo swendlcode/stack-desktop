@@ -271,6 +271,14 @@ impl Player {
         self.send(Cmd::Volume(volume))
     }
 
+    /// Repeat whatever the browser is playing, until told otherwise.
+    ///
+    /// The flag lives on the mixer, not on the voice, so it survives moving
+    /// to the next sample — which is the point of it.
+    pub fn set_loop(&self, enabled: bool) -> Result<()> {
+        self.send(Cmd::Loop(enabled))
+    }
+
     /// Drop decoded buffers for files that have left the disk or changed.
     pub fn forget(&self, paths: &[PathBuf]) {
         self.cache.lock().forget(paths);
